@@ -53,8 +53,9 @@ CSVから必要な値を読み取り、対象の記録計へ送信します。
 5. 送信成功時は `DONE` へ移動する  
 6. 送信失敗時は `ERROR` へ移動する  
 7. 必要に応じて履歴やログで追跡する  
-※　監視するCSVやデータを入れるaccessはsetting.iniで設定する
-※　このsetting.iniはmain.pyやmain.exe等の動作させるファイルやソフトと同じ場所に入れる。
+**補足**
+- 監視するCSVやデータを入れるAccessは `setting.ini` で設定する
+- この `setting.ini` は `main.py` や `main.exe` などの動作させるファイルと同じ場所に置く
 ---
 
 ## 4. フォルダ構成
