@@ -443,6 +443,7 @@ def build_ui():
         comment_entry.delete(0, tk.END)
         inter_combo.current(0)
 
+
     # 前回データの取得
     def before_data():
 
