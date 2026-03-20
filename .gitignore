@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.log
 *.json
+app.pid
 DONE/
 ERROR/
 logs/

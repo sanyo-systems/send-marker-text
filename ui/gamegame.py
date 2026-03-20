@@ -463,6 +463,11 @@ def build_ui():
             prev_data_data[i].config(text=dt.strftime("%Y-%m-%d"))
             prev_data_time[i].config(text=dt.strftime("%H:%M:%S"))
             prev_ipadress[i].config(text=ip)
+
+            # ★★★ ここ追加（超重要）★★★
+        for e_act in entry_act_list:
+            e_act.delete(0, tk.END)
+
     before_data()
 
     # =====================================================

@@ -16,17 +16,6 @@ from utils.file_state import load_state, save_state
 
 CHECK_DB_PATH = ACCESS_FILE_2
 WATCH_FOLDER = CSV_FOLDER
-ipadress = [
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1"
-]
 
 # ===== 列定義 =====
 R_RO_NO = 0
@@ -42,14 +31,20 @@ def normalize_history_value(value):
 class CSVHandler(FileSystemEventHandler):
     def __init__(self):
         self.last_trigger_time = None
-        self.last_instruction = None
         self.sent_history = load_history()
-        self.last_scan_files = set()
         self.file_state = load_state()
         self.inflight_keys = set()
 
     def normalize_key(self, filename):
         return filename.strip().lower()
+
+    def enqueue_with_inflight(self, data, key, retry_count=0):
+        self.inflight_keys.add(key)
+        try:
+            enqueue(data, key, retry_count=retry_count)
+        except Exception:
+            self.inflight_keys.discard(key)
+            raise
 
 
     # ==========================================================
@@ -131,7 +126,7 @@ class CSVHandler(FileSystemEventHandler):
         # ===== ファイル存在チェック =====
         if not os.path.exists(path):
             logging.warning(f"SKIP_FILE_NOT_FOUND {path}")
-            return False
+            return "FILE_NOT_FOUND"
 
         
 
@@ -154,60 +149,70 @@ class CSVHandler(FileSystemEventHandler):
         if not instruction_no or not start_time:
             logging.error("CSV_INVALID_DATA")
             return None
-        # ===== CSVファイル名取得 =====
-        filename = os.path.basename(path)
-        target = None
-        for rec in RECORDER_CONFIG:
-            if rec["file"] == filename:
-                target = rec
-                break
-        if not target:
-            logging.error(f"UNKNOWN_CSV_FILE {filename}")
-            return False
-        ip = target["ip"]
-        port = target["port"]
-        # ===== 記録計送信テキスト作成 =====
-        text = f"{syori_name} {reikyakku_name}"
-        # ===== 記録計送信 =====
-        logging.info(f"SEND_START ip={ip} text={text}")  # ← ★追加
-        success = send_with_retry(
-            ip,
-            port,
-            text,
-            1,
-            100
-        )
-        if success:
-            logging.info(f"SEND_SUCCESS {ip} FILE {path}")  # ← ★追加
-            insert_csv_history(
-                CHECK_DB_PATH,
-                data,
-                ip
-            )
-
-
-            # ===== ここ追加 =====
+        try:
             filename = os.path.basename(path)
-            key = self.normalize_key(filename)
+            target = None
+            for rec in RECORDER_CONFIG:
+                if rec["file"] == filename:
+                    target = rec
+                    break
+            if not target:
+                logging.error(f"UNKNOWN_CSV_FILE {filename}")
+                return False
 
-            if os.path.exists(path):
-                self.file_state[key] = os.path.getmtime(path)
-                save_state(self.file_state)
-            else:
-                logging.warning(f"STATE_SKIP_FILE_NOT_FOUND {path}")
-            
-            moved = move_csv_done(path)
-            if not moved:
-                logging.warning(f"CSV_DONE_MOVE_PENDING {path}")
-            self.inflight_keys.discard(queue_key)
-            return True
-        else:
-            logging.error(f"SEND_FAILED {ip} FILE {path}")  # ← ★追加
-            moved = move_csv_error(path)
-            if not moved:
-                logging.warning(f"CSV_ERROR_MOVE_PENDING {path}")
-            self.inflight_keys.discard(queue_key)
+            ip = target["ip"]
+            port = target["port"]
+            text = f"{syori_name} {reikyakku_name}"
+            logging.info(f"SEND_START ip={ip} text={text}")
+            success = send_with_retry(
+                ip,
+                port,
+                text,
+                1,
+                100
+            )
+            if success:
+                logging.info(f"SEND_SUCCESS {ip} FILE {path}")
+                self.sent_history.add(queue_key)
+
+                try:
+                    insert_csv_history(
+                        CHECK_DB_PATH,
+                        data,
+                        ip
+                    )
+                except Exception as e:
+                    logging.error(f"CSV_HISTORY_SAVE_ERROR {path} {e}")
+
+                key = self.normalize_key(filename)
+                try:
+                    if os.path.exists(path):
+                        self.file_state[key] = os.path.getmtime(path)
+                        save_state(self.file_state)
+                    else:
+                        logging.warning(f"STATE_SKIP_FILE_NOT_FOUND {path}")
+                except Exception as e:
+                    logging.error(f"FILE_STATE_SAVE_ERROR {path} {e}")
+
+                try:
+                    moved = move_csv_done(path)
+                    if not moved:
+                        logging.warning(f"CSV_DONE_MOVE_PENDING {path}")
+                except Exception as e:
+                    logging.error(f"CSV_DONE_MOVE_ERROR {path} {e}")
+
+                return True
+
+            logging.error(f"SEND_FAILED {ip} FILE {path}")
+            try:
+                moved = move_csv_error(path)
+                if not moved:
+                    logging.warning(f"CSV_ERROR_MOVE_PENDING {path}")
+            except Exception as e:
+                logging.error(f"CSV_ERROR_MOVE_ERROR {path} {e}")
             return False
+        finally:
+            self.inflight_keys.discard(queue_key)
 
     # ==========================================================
     # CSV更新イベント処理
@@ -291,8 +296,7 @@ class CSVHandler(FileSystemEventHandler):
             return
 
         # ===== ここで送信キューに送る =====
-        self.inflight_keys.add(key)
-        enqueue(data, key)
+        self.enqueue_with_inflight(data, key)
 
     # ==========================================================
     # CSV読み込み処理
@@ -399,8 +403,7 @@ def start_csv_watch(handler):
                     if key in handler.inflight_keys:
                         logging.info(f"SCAN_SKIP_INFLIGHT {key}")
                         continue
-                    handler.inflight_keys.add(key)
-                    enqueue(data, key)
+                    handler.enqueue_with_inflight(data, key)
 
             except Exception as e:
                 logging.error(f"CSV_SCAN_ERROR {e}")

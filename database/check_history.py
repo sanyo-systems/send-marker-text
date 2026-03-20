@@ -29,17 +29,17 @@ def load_latest_history(accdb_path, furnace_name):
     with pyodbc.connect(conn_str) as conn:
 
         cur = conn.cursor()
-        if not row:
-            logging.warning(f"履歴無し 炉={furnace_name}")
-            return None
         sql = """
         SELECT TOP 1 記録日時, IPadress
         FROM チェック履歴
-        WHERE 炉名 = ? and type = "1H"
+        WHERE 炉名 = ? and [type] = ?
         ORDER BY 記録日時 DESC
         """
         # 指定した炉の最新履歴を取得
-        cur.execute(sql, (furnace_name,))
+        cur.execute(sql, (furnace_name, "1H"))
         row = cur.fetchone()
+        if not row:
+            logging.warning(f"履歴無し 炉={furnace_name}")
+            return None
 
         return row
