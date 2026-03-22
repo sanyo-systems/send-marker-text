@@ -34,6 +34,10 @@ def send_temp(all_list, person, now, hour, hour_type):
         if not str(act_temp).strip():
             continue
         # 変数 = name if 条件式 else name2で条件式の時は変数はname、それ以外はname2
+        # ★★★ 追加（先にチェック）★★★
+        if not str(act_temp).replace(".", "", 1).isdigit():
+            return False, f"{inter[ro_no]}は数値のみ入力してください"
+
         try:
             act_val = int(float(act_temp))
         except (ValueError, TypeError):

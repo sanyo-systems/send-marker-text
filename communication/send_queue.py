@@ -4,23 +4,13 @@ import logging
 from queue import Queue, Empty
 import threading
 from history.sent_history import load_history, save_history
-from history.retry_queue import add_failed
+from history.retry_queue import add_failed, remove_failed
+from utils.key_utils import normalize_key_tuple
 
 send_queue = Queue()
 QUEUE_FILE = "send_queue.json"
 
-# ==========================================================
-# 送信キュー保存（安全保存）
-#
-# 送信待ちデータをJSONファイルとして保存する。
-# 一時ファイル(.tmp)へ書き込み後、os.replaceで置き換えることで
-# 書き込み途中のJSON破損を防止する。
-#
-# flush + fsync を行うことでディスクへ確実に書き込みを行う。
-#
-# 工場ソフトでは停電・強制終了時のデータ破損防止のため
-# この方式を使用する。
-# ==========================================================
+
 def save_queue(data):
     tmp_file = QUEUE_FILE + ".tmp"
     with open(tmp_file, "w", encoding="utf-8") as f:
@@ -29,14 +19,7 @@ def save_queue(data):
         os.fsync(f.fileno())
     os.replace(tmp_file, QUEUE_FILE)
 
-# ==========================================================
-# 送信キュー読み込み
-#
-# JSONファイルから送信待ちキューを読み込む。
-# ファイルが存在しない場合は空リストを返す。
-#
-# JSON破損時はログを出しキューを初期化する。
-# ==========================================================
+
 def load_queue():
     if not os.path.exists(QUEUE_FILE):
         return []
@@ -44,111 +27,113 @@ def load_queue():
         with open(QUEUE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        # JSON破損時は初期化
         logging.error("QUEUE_FILE_BROKEN reset")
         return []
 
-# ==========================================================
-# キューファイル排他制御
-#
-# 複数スレッドから同時にキュー保存が行われると
-# JSON破損が起きる可能性があるためLockで保護する。
-# ==========================================================
+
 queue_lock = threading.Lock()
 
-# ==========================================================
-# 送信キュー登録
-#
-# 新しい送信データを
-# ・メモリキュー
-# ・永続キュー(JSON)
-# の両方へ登録する。
-#
-# これにより
-# ・リアルタイム送信
-# ・再起動後のキュー復元
-# を両立している。
-# ==========================================================
-def enqueue(data, key):
-    MAX_QUEUE_SIZE = 1000
-    if send_queue.qsize() >= MAX_QUEUE_SIZE:
-        logging.error("QUEUE_OVERFLOW drop data")
-        return
-    logging.info(f"ENQUEUE_START key={key}")
-    send_queue.put((data, key))
+
+def _remove_from_persistent_queue(key):
+    key = normalize_key_tuple(key)
     with queue_lock:
         queue_data = load_queue()
-        queue_data.append({"data": data, "key": key})
+        queue_data = [
+            x for x in queue_data
+            if "key" in x and normalize_key_tuple(x["key"]) != key
+        ]
         save_queue(queue_data)
-    logging.info(f"ENQUEUE_DONE key={key} qsize={send_queue.qsize()}")
 
-# ==========================================================
-# 送信ワーカースレッド
-#
-# メモリキュー(send_queue)からデータを取り出し
-# 記録計送信処理(process_func)を実行する。
-#
-# 起動時にはJSON保存されたキューを読み込み
-# 未送信データを復元する。
-#
-# 処理結果
-# 成功:
-#   ・履歴保存
-#   ・永続キュー削除
-#
-# 失敗:
-#   ・failed_queueへ登録
-#
-# これにより
-# ・送信保証
-# ・再起動復旧
-# を実現している。
-# ==========================================================
+
+def load_queue_keys():
+    keys = set()
+    for item in load_queue():
+        if "key" not in item:
+            continue
+        keys.add(normalize_key_tuple(item["key"]))
+    return keys
+
+
+def _persist_success(key, sent_history):
+    key = normalize_key_tuple(key)
+    sent_history.add(key)
+    save_history(sent_history)
+    remove_failed(key)
+    _remove_from_persistent_queue(key)
+
+
+def _persist_failure(data, key, retry_count):
+    key = normalize_key_tuple(key)
+    add_failed({
+        "data": data,
+        "key": key,
+        "retry": retry_count
+    })
+    _remove_from_persistent_queue(key)
+
+
+def enqueue(data, key, retry_count=0):
+    key = normalize_key_tuple(key)
+    max_queue_size = 1000
+    if send_queue.qsize() >= max_queue_size:
+        raise RuntimeError("QUEUE_OVERFLOW drop data")
+
+    queue_item = (data, key, retry_count)
+    logging.info(f"ENQUEUE_START key={key} retry={retry_count}")
+    send_queue.put(queue_item)
+    with queue_lock:
+        queue_data = load_queue()
+        queue_data.append({
+            "data": data,
+            "key": list(key),
+            "retry": retry_count
+        })
+        save_queue(queue_data)
+    logging.info(
+        f"ENQUEUE_DONE key={key} retry={retry_count} qsize={send_queue.qsize()}"
+    )
+
+
 def start_worker(process_func):
     sent_history = load_history()
     logging.info("SEND_WORKER_STARTED")
-    # ===== 起動時キュー復元 =====
     for item in load_queue():
-        send_queue.put((item["data"], tuple(item["key"])))
+        send_queue.put((
+            item["data"],
+            normalize_key_tuple(item["key"]),
+            int(item.get("retry", 0))
+        ))
+
     def worker():
         while True:
             try:
-                data, key = send_queue.get(timeout=10)
+                data, key, retry_count = send_queue.get(timeout=10)
             except Empty:
                 continue
+
             try:
-                logging.info(f"WORKER_PICKED key={key}")
+                logging.info(f"WORKER_PICKED key={key} retry={retry_count}")
                 success = process_func(data)
-                logging.info(f"WORKER_RESULT key={key} success={success}")
-                # 送信成功した場合のみ履歴保存
-                if success:
-                    sent_history.add(key)
-                    # 履歴の保存
-                    save_history(sent_history)
-                    # queueから削除
-                    with queue_lock:
-                        queue_data = load_queue()
-                        queue_data = [
-                            x for x in queue_data
-                            if "key" in x and tuple(x["key"]) != key
-                        ]
-                        save_queue(queue_data)     
+
+                # ★ ここ追加
+                if success == "FILE_NOT_FOUND":
+                    logging.warning(f"REMOVE_FAILED_FILE key={key}")
+                    remove_failed(key)
+                    _remove_from_persistent_queue(key)
+                    continue
+
+                logging.info(
+                    f"WORKER_RESULT key={key} retry={retry_count} success={success}"
+                )
+                if success is True:
+                    _persist_success(key, sent_history)
                 else:
-                    add_failed({
-                        "data": data,
-                        "key": key
-                    })
-                    # 永続キューからは削除する
-                    with queue_lock:
-                        queue_data = load_queue()
-                        queue_data = [
-                            x for x in queue_data
-                            if "key" in x and tuple(x["key"]) != key
-                        ]
-                        save_queue(queue_data)
+                    _persist_failure(data, key, retry_count)
             except Exception as e:
-                logging.error(f"SEND_WORKER_ERROR {e}")
+                logging.error(f"SEND_WORKER_ERROR key={key} retry={retry_count} {e}")
+                _persist_failure(data, key, retry_count)
             finally:
                 send_queue.task_done()
+
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()

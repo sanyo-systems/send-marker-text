@@ -1,49 +1,66 @@
 import json
 import os
+import logging
+import threading
+from utils.key_utils import normalize_key_tuple
 
 FAILED_FILE = "failed_send.json"
+file_lock = threading.Lock()
 
-# ==========================================================
-# 送信失敗データ読み込み
-#
-# 通信失敗時に保存された failed_send.json を読み込み、
-# 再送対象データを取得する。
-#
-# ファイルが存在しない場合は空リストを返す。
-# ==========================================================
+def _save_json_atomic(path, data):
+    tmp_file = path + ".tmp"
+    with file_lock:  # ★ここ追加（最重要）
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, path)
+
+
+def _normalize_key(key):
+    return normalize_key_tuple(key)
+
+
 def load_failed():
-
     if not os.path.exists(FAILED_FILE):
         return []
 
-    with open(FAILED_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(FAILED_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logging.error(f"FAILED_FILE_BROKEN reset: {e}")
+        return []
 
-# ==========================================================
-# 送信失敗データ保存
-#
-# failed_send.json に再送対象データを書き込む。
-# JSON形式で保存することでプログラム再起動後も
-# 再送処理を継続できる。
-# ==========================================================
+
 def save_failed(data):
+    _save_json_atomic(FAILED_FILE, data)
 
-    with open(FAILED_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ==========================================================
-# 送信失敗データ追加
-#
-# 通信失敗時のデータを failed_send.json に追加し、
-# retry_worker による再送対象として登録する。
-#
-# これにより一時的な通信断でも
-# データ消失を防ぐことができる。
-# ==========================================================
 def add_failed(record):
-
     data = load_failed()
+    target_key = _normalize_key(record["key"])
+    new_retry = int(record.get("retry", 0))
 
-    data.append(record)
+    for item in data:
+        if _normalize_key(item.get("key", [])) == target_key:
+            item["data"] = record["data"]
+            item["retry"] = max(int(item.get("retry", 0)), new_retry)
+            save_failed(data)
+            return
 
+    data.append({
+        "data": record["data"],
+        "key": list(target_key),
+        "retry": new_retry
+    })
+    save_failed(data)
+
+
+def remove_failed(key):
+    target_key = _normalize_key(key)
+    data = [
+        item for item in load_failed()
+        if _normalize_key(item.get("key", [])) != target_key
+    ]
     save_failed(data)
