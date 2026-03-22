@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import signal
@@ -15,13 +16,24 @@ from csv_monitor.csv_watcher import (
     start_csv_watch,
 )
 from csv_monitor.retry_worker import retry_loop
+from history.sent_history import load_history
 from monitoring.health_monitor import heartbeat_loop
 from monitoring.logger_config import setup_logger
 from monitoring.thread_watchdog import monitor_threads
 from ui.gamegame import build_ui
+from utils.key_utils import normalize_key_tuple
+from state_reconciler import reconcile_state
+
+PID_FILE = "app.pid"
 
 
-def enqueue_with_inflight(handler, data, key, retry_count=0):
+def enqueue_with_inflight(handler, data, key, queued_keys=None, retry_count=0):
+    key = normalize_key_tuple(key)
+    queued_keys = queued_keys or set()
+
+    if key in handler.sent_history or key in handler.inflight_keys or key in queued_keys:
+        return
+
     handler.inflight_keys.add(key)
     try:
         enqueue(data, key, retry_count=retry_count)
@@ -30,27 +42,57 @@ def enqueue_with_inflight(handler, data, key, retry_count=0):
         raise
 
 
-PID_FILE = "app.pid"
+def _read_pid_info():
+    if not os.path.exists(PID_FILE):
+        return None
+
+    try:
+        with open(PID_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {
+            "pid": int(data["pid"]),
+            "create_time": float(data["create_time"]),
+            "process_name": str(data["process_name"]),
+        }
+    except Exception:
+        return None
+
+
+def _write_pid_info():
+    current = psutil.Process()
+    with open(PID_FILE, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "pid": current.pid,
+                "create_time": current.create_time(),
+                "process_name": current.name(),
+            },
+            f
+        )
+
+
+def _remove_pid_file():
+    try:
+        if os.path.exists(PID_FILE):
+            os.remove(PID_FILE)
+    except Exception as e:
+        logging.error(f"PID_REMOVE_ERROR {e}")
+
 
 def check_single_instance():
-    if os.path.exists(PID_FILE):
+    pid_info = _read_pid_info()
+    if pid_info:
         try:
-            with open(PID_FILE) as f:
-                pid = int(f.read())
-
-            if psutil.pid_exists(pid):
+            process = psutil.Process(pid_info["pid"])
+            if abs(process.create_time() - pid_info["create_time"]) < 1:
                 print("既に起動しています")
                 sys.exit()
-            else:
-                # ★ 死んでるPIDなら削除
-                os.remove(PID_FILE)
-
-        except Exception:
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
 
-    # ★ 自分のPIDを書き込む
-    with open(PID_FILE, "w") as f:
-        f.write(str(os.getpid()))
+        _remove_pid_file()
+
+    _write_pid_info()
 
 
 def graceful_shutdown(signum, frame):
@@ -63,13 +105,7 @@ def graceful_shutdown(signum, frame):
     except Exception as e:
         logging.error(f"SHUTDOWN_SAVE_ERROR {e}")
 
-    # ★ 追加
-    try:
-        if os.path.exists(PID_FILE):
-            os.remove(PID_FILE)
-    except Exception as e:
-        logging.error(f"PID_REMOVE_ERROR {e}")
-
+    _remove_pid_file()
     logging.info("SYSTEM_SHUTDOWN_COMPLETE")
     sys.exit(0)
 
@@ -92,7 +128,7 @@ def watchdog_recovery(handler, threads):
         time.sleep(120)
 
 
-def startup_csv_check(handler):
+def startup_csv_check(handler, queued_keys):
     for file_name in os.listdir(WATCH_FOLDER):
         if not file_name.lower().endswith(".csv"):
             continue
@@ -103,11 +139,12 @@ def startup_csv_check(handler):
             if not data:
                 continue
 
-            key = (data["instruction_no"], data["start_time"])
-            if key in handler.sent_history or key in handler.inflight_keys:
+            key = normalize_key_tuple((data["instruction_no"], data["start_time"]))
+            if key in handler.sent_history or key in handler.inflight_keys or key in queued_keys:
                 continue
 
-            enqueue_with_inflight(handler, data, key)
+            enqueue_with_inflight(handler, data, key, queued_keys=queued_keys)
+            queued_keys.add(key)
         except Exception as e:
             logging.error(f"STARTUP_CSV_ERROR {e}")
 
@@ -123,8 +160,21 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, graceful_shutdown)
     signal.signal(signal.SIGTERM, graceful_shutdown)
 
-    handler = CSVHandler()
-    startup_csv_check(handler)
+    persisted_queue = load_queue()
+    restored_inflight_keys = {
+        normalize_key_tuple(item["key"])
+        for item in persisted_queue
+        if "key" in item
+    }
+    sent_history = load_history()
+    handler = CSVHandler(
+        sent_history=sent_history,
+        inflight_keys=restored_inflight_keys,
+    )
+
+    reconcile_state(handler)
+
+    startup_csv_check(handler, restored_inflight_keys)
     start_worker(handler.process_csv_data)
 
     retry_thread = threading.Thread(
@@ -164,5 +214,8 @@ if __name__ == "__main__":
     )
     watchdog_thread.start()
 
-    app = build_ui()
-    app.mainloop()
+    try:
+        app = build_ui()
+        app.mainloop()
+    finally:
+        _remove_pid_file()

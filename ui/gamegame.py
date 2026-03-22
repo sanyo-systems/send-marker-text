@@ -464,10 +464,6 @@ def build_ui():
             prev_data_time[i].config(text=dt.strftime("%H:%M:%S"))
             prev_ipadress[i].config(text=ip)
 
-            # ★★★ ここ追加（超重要）★★★
-        for e_act in entry_act_list:
-            e_act.delete(0, tk.END)
-
     before_data()
 
     # =====================================================
@@ -479,6 +475,23 @@ def build_ui():
     # ③Access履歴保存
     # ④UI更新
     # =====================================================
+    def save_check_data(temp_dict):
+        insert_check_history_batch(
+            CHECK_DB_PATH,
+            EMP_DB_PATH,
+            temp_dict
+        )
+
+    def refresh_check_ui():
+        before_data()
+        messagebox.showinfo("成功", "送信準備完了")
+
+    def clear_check_inputs():
+        for e_act in entry_act_list:
+            e_act.delete(0, tk.END)
+        one_person.delete(0, tk.END)
+        four_person.delete(0, tk.END)
+
     # チェック用の送信処理準備
     def on_ok():
         hour = check_time()
@@ -521,20 +534,9 @@ def build_ui():
             messagebox.showerror("エラー", temp_dict)
             return
 
-        # 保存
-        insert_check_history_batch(
-            CHECK_DB_PATH,
-            EMP_DB_PATH,
-            temp_dict
-        )
-        messagebox.showinfo("成功", "送信準備完了")
-        before_data()
-        # list内の実測温度の削除
-        for e_act in entry_act_list:
-            e_act.delete(0, tk.END)
-        # 確認者の内容削除
-        one_person.delete(0, tk.END)
-        four_person.delete(0, tk.END)
+        save_check_data(temp_dict)
+        refresh_check_ui()
+        clear_check_inputs()
         return root
     
 

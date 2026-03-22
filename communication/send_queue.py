@@ -5,6 +5,7 @@ from queue import Queue, Empty
 import threading
 from history.sent_history import load_history, save_history
 from history.retry_queue import add_failed, remove_failed
+from utils.key_utils import normalize_key_tuple
 
 send_queue = Queue()
 QUEUE_FILE = "send_queue.json"
@@ -34,16 +35,27 @@ queue_lock = threading.Lock()
 
 
 def _remove_from_persistent_queue(key):
+    key = normalize_key_tuple(key)
     with queue_lock:
         queue_data = load_queue()
         queue_data = [
             x for x in queue_data
-            if "key" in x and tuple(x["key"]) != key
+            if "key" in x and normalize_key_tuple(x["key"]) != key
         ]
         save_queue(queue_data)
 
 
+def load_queue_keys():
+    keys = set()
+    for item in load_queue():
+        if "key" not in item:
+            continue
+        keys.add(normalize_key_tuple(item["key"]))
+    return keys
+
+
 def _persist_success(key, sent_history):
+    key = normalize_key_tuple(key)
     sent_history.add(key)
     save_history(sent_history)
     remove_failed(key)
@@ -51,6 +63,7 @@ def _persist_success(key, sent_history):
 
 
 def _persist_failure(data, key, retry_count):
+    key = normalize_key_tuple(key)
     add_failed({
         "data": data,
         "key": key,
@@ -60,10 +73,10 @@ def _persist_failure(data, key, retry_count):
 
 
 def enqueue(data, key, retry_count=0):
+    key = normalize_key_tuple(key)
     max_queue_size = 1000
     if send_queue.qsize() >= max_queue_size:
-        logging.error("QUEUE_OVERFLOW drop data")
-        return
+        raise RuntimeError("QUEUE_OVERFLOW drop data")
 
     queue_item = (data, key, retry_count)
     logging.info(f"ENQUEUE_START key={key} retry={retry_count}")
@@ -72,7 +85,7 @@ def enqueue(data, key, retry_count=0):
         queue_data = load_queue()
         queue_data.append({
             "data": data,
-            "key": key,
+            "key": list(key),
             "retry": retry_count
         })
         save_queue(queue_data)
@@ -87,7 +100,7 @@ def start_worker(process_func):
     for item in load_queue():
         send_queue.put((
             item["data"],
-            tuple(item["key"]),
+            normalize_key_tuple(item["key"]),
             int(item.get("retry", 0))
         ))
 

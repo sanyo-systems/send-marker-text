@@ -1,21 +1,24 @@
 import json
 import os
 import logging
+import threading
+from utils.key_utils import normalize_key_tuple
 
 FAILED_FILE = "failed_send.json"
-
+file_lock = threading.Lock()
 
 def _save_json_atomic(path, data):
     tmp_file = path + ".tmp"
-    with open(tmp_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_file, path)
+    with file_lock:  # ★ここ追加（最重要）
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, path)
 
 
 def _normalize_key(key):
-    return tuple(key)
+    return normalize_key_tuple(key)
 
 
 def load_failed():

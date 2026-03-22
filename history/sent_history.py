@@ -1,6 +1,7 @@
 import json
 import os
 import logging
+from utils.key_utils import normalize_key_tuple
 
 HISTORY_FILE = "sent_history.json"
 
@@ -25,8 +26,9 @@ def load_history():
         logging.error(f"HISTORY_FILE_BROKEN reset: {e}")
         return set()
 
-    return set(tuple(x) for x in data)
+    return set(normalize_key_tuple(x) for x in data)
 
 
 def save_history(history):
-    _save_json_atomic(HISTORY_FILE, list(history))
+    normalized = [list(normalize_key_tuple(key)) for key in history]
+    _save_json_atomic(HISTORY_FILE, normalized)
