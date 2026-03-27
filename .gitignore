@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.log
 *.json
+app.pid
 DONE/
 ERROR/
 logs/
@@ -18,3 +19,4 @@ build/
 
 # 仮想環境
 venv/
+venv32/

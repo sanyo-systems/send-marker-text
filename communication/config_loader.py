@@ -31,8 +31,13 @@ for i in range(1, 10):
     port = config.getint("SECTION_1", f"RECORDER_PORT{i}")
     file = config.get("SECTION_1", f"CSV_FILE{i}")
 
+    # グループは1〜4でループさせる
+    group_index = ((i - 1) % 4) + 1
+    group_no = config.getint("SECTION_1", f"RECORDER_GROUP{group_index}")
+
     RECORDER_CONFIG.append({
         "file": file,
         "ip": ip,
-        "port": port
+        "port": port,
+        "group_no": group_no
     })

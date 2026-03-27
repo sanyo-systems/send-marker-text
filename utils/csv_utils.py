@@ -2,11 +2,17 @@ import shutil
 import os
 import time
 import logging
+from datetime import datetime
 
 def move_csv_done(path):
     done_dir = os.path.join(os.path.dirname(path), "DONE")
     os.makedirs(done_dir, exist_ok=True)
-    new_path = os.path.join(done_dir, os.path.basename(path))
+
+    base_name = os.path.basename(path)
+    name, ext = os.path.splitext(base_name)
+    now_str = datetime.now().strftime("%Y%m%d%H%M%S")
+    new_filename = f"{name}_{now_str}{ext}"
+    new_path = os.path.join(done_dir, new_filename)
 
     for i in range(10):
         try:
@@ -26,7 +32,11 @@ def move_csv_done(path):
 def move_csv_error(path):
     err_dir = os.path.join(os.path.dirname(path), "ERROR")
     os.makedirs(err_dir, exist_ok=True)
-    new_path = os.path.join(err_dir, os.path.basename(path))
+    base_name = os.path.basename(path)
+    name, ext = os.path.splitext(base_name)
+    now_str = datetime.now().strftime("%Y%m%d%H%M%S")
+    new_filename = f"{name}_{now_str}{ext}"
+    new_path = os.path.join(err_dir, new_filename)
 
     for i in range(10):
         try:

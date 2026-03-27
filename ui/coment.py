@@ -3,11 +3,9 @@ import os
 import sys
 def get_base_dir():
     if getattr(sys, "frozen", False):
-        # exe実行
         return os.path.dirname(sys.executable)
+    return os.getcwd()
 
-    # python実行
-    return os.path.dirname(os.path.abspath(__file__))
 # コメントを送るパスリスト
 BASE_DIR = os.path.join(get_base_dir(), "comment")
 os.makedirs(BASE_DIR, exist_ok=True)

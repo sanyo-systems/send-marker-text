@@ -1,11 +1,10 @@
 import tkinter as tk
 import threading
 import logging
-import pyodbc
 from collections import defaultdict
 from tkinter import ttk, messagebox
-import json
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
+import time
 from ui.validation import send_temp
 from ui.coment import comment
 from database.teitei import load_history_from_access
@@ -443,6 +442,7 @@ def build_ui():
         comment_entry.delete(0, tk.END)
         inter_combo.current(0)
 
+
     # 前回データの取得
     def before_data():
 
@@ -462,6 +462,7 @@ def build_ui():
             prev_data_data[i].config(text=dt.strftime("%Y-%m-%d"))
             prev_data_time[i].config(text=dt.strftime("%H:%M:%S"))
             prev_ipadress[i].config(text=ip)
+
     before_data()
 
     # =====================================================
@@ -473,6 +474,23 @@ def build_ui():
     # ③Access履歴保存
     # ④UI更新
     # =====================================================
+    def save_check_data(temp_dict):
+        insert_check_history_batch(
+            CHECK_DB_PATH,
+            EMP_DB_PATH,
+            temp_dict
+        )
+
+    def refresh_check_ui():
+        before_data()
+        messagebox.showinfo("成功", "送信準備完了")
+
+    def clear_check_inputs():
+        for e_act in entry_act_list:
+            e_act.delete(0, tk.END)
+        one_person.delete(0, tk.END)
+        four_person.delete(0, tk.END)
+
     # チェック用の送信処理準備
     def on_ok():
         hour = check_time()
@@ -515,23 +533,46 @@ def build_ui():
             messagebox.showerror("エラー", temp_dict)
             return
 
-        # 保存
-        insert_check_history_batch(
-            CHECK_DB_PATH,
-            EMP_DB_PATH,
-            temp_dict
-        )
-        messagebox.showinfo("成功", "送信準備完了")
-        before_data()
-        # list内の実測温度の削除
-        for e_act in entry_act_list:
-            e_act.delete(0, tk.END)
-        # 確認者の内容削除
-        one_person.delete(0, tk.END)
-        four_person.delete(0, tk.END)
+        save_check_data(temp_dict)
+        refresh_check_ui()
+        clear_check_inputs()
         return root
     
 
+    def check_1h_popup():
+        now = datetime.now()
+        current_hour = now.hour
+
+        rows = load_history_from_access(
+            CHECK_DB_PATH,
+            now,
+            "1H"
+        )
+
+        # 1件でもあればOK
+        for furnace_name, hour in rows:
+            if int(hour) == current_hour:
+                return
+
+        # 1件も無い → ポップアップ
+        messagebox.showwarning(
+            "1Hチェック未実施",
+            f"{current_hour}時の1Hチェックが未実施です"
+        )
+
+    def popup_loop():
+        last_checked_hour = None
+
+        while True:
+            now = datetime.now()
+
+            # 毎時00分でチェック
+            if now.minute <= 10:
+                if last_checked_hour != now.hour:
+                    root.after(0, check_1h_popup)
+                    last_checked_hour = now.hour
+
+            time.sleep(5)
 
     # 取れなかった場合の再取得ボタン
     btn_ok = ttk.Button(before_frame, text="再読み込み", command=before_data)
@@ -544,6 +585,14 @@ def build_ui():
     # 送信でコメント送信
     btn_ok = ttk.Button(coment_frame, text="登録", command=on_comment)
     btn_ok.grid(row=2, column=1)
+
+    popup_thread = threading.Thread(
+        target=popup_loop,
+        daemon=True
+    )
+    popup_thread.start()
+
+
     return root
 
 
@@ -552,7 +601,7 @@ if __name__ == "__main__":
     setup_logger()
     # ログ初期化
     handler = CSVHandler()
-    start_worker(handler.process_csv_data)
+    start_worker(handler.process_csv_data, sent_history=handler.sent_history)
     # CSV処理ワーカー起動
     retry_thread = threading.Thread(
         target=retry_loop,
