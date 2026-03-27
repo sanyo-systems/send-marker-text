@@ -212,6 +212,7 @@ def start_csv_thread(handler):
 
 
 if __name__ == "__main__":
+    print("thank you")
     check_single_instance()
     setup_logger()
 

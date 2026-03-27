@@ -1,6 +1,7 @@
 import os
 import subprocess
 import time
+import shutil
 
 BASE_DIR = r"C:\SendMarkerText\sendpython"
 
@@ -45,7 +46,7 @@ def update():
         os.rename(NEW_EXE, MAIN_EXE)
 
         # version更新
-        os.rename(NEW_VERSION_FILE, VERSION_FILE)
+        os.replace(NEW_VERSION_FILE, VERSION_FILE)
 
         print("アップデート成功")
 
@@ -54,7 +55,7 @@ def update():
 
         # 復旧
         if os.path.exists(OLD_EXE):
-            os.rename(OLD_EXE, MAIN_EXE)
+            os.replace(OLD_EXE, MAIN_EXE)
 
 
 def main():
