@@ -1,11 +1,10 @@
 import tkinter as tk
 import threading
 import logging
-import pyodbc
 from collections import defaultdict
 from tkinter import ttk, messagebox
-import json
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
+import time
 from ui.validation import send_temp
 from ui.coment import comment
 from database.teitei import load_history_from_access
@@ -540,6 +539,40 @@ def build_ui():
         return root
     
 
+    def check_1h_popup():
+        now = datetime.now()
+        current_hour = now.hour
+
+        rows = load_history_from_access(
+            CHECK_DB_PATH,
+            now,
+            "1H"
+        )
+
+        # 1件でもあればOK
+        for furnace_name, hour in rows:
+            if int(hour) == current_hour:
+                return
+
+        # 1件も無い → ポップアップ
+        messagebox.showwarning(
+            "1Hチェック未実施",
+            f"{current_hour}時の1Hチェックが未実施です"
+        )
+
+    def popup_loop():
+        last_checked_hour = None
+
+        while True:
+            now = datetime.now()
+
+            # 毎時00分でチェック
+            if now.minute <= 10:
+                if last_checked_hour != now.hour:
+                    root.after(0, check_1h_popup)
+                    last_checked_hour = now.hour
+
+            time.sleep(5)
 
     # 取れなかった場合の再取得ボタン
     btn_ok = ttk.Button(before_frame, text="再読み込み", command=before_data)
@@ -552,6 +585,14 @@ def build_ui():
     # 送信でコメント送信
     btn_ok = ttk.Button(coment_frame, text="登録", command=on_comment)
     btn_ok.grid(row=2, column=1)
+
+    popup_thread = threading.Thread(
+        target=popup_loop,
+        daemon=True
+    )
+    popup_thread.start()
+
+
     return root
 
 
@@ -560,7 +601,7 @@ if __name__ == "__main__":
     setup_logger()
     # ログ初期化
     handler = CSVHandler()
-    start_worker(handler.process_csv_data)
+    start_worker(handler.process_csv_data, sent_history=handler.sent_history)
     # CSV処理ワーカー起動
     retry_thread = threading.Thread(
         target=retry_loop,

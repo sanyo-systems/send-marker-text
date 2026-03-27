@@ -20,14 +20,53 @@ CHECK_DB_PATH = ACCESS_FILE_2
 WATCH_FOLDER = CSV_FOLDER
 
 # ===== 列定義 =====
-R_RO_NO = 0
 R_INSTRUCTION_NO = 1
-R_START_TIME = 37
-R_SYORI_NAME = 38
+R_START_TIME = 38
+R_END_TIME = 39  # ← CSVの列番号
+R_SYORI_NAME = 40
 R_REIKYAKU_NAME = 41
 
+MAX_TEXT_LENGTH = 30  # 仮（後で調整）
+
+def split_instruction_list(instruction_list):
+    result = []
+    current = ""
+
+    for ins in instruction_list:
+        if not current:
+            current = ins
+        elif len((current + "/" + ins).encode("shift_jis")) <= MAX_TEXT_LENGTH:
+            current += "/" + ins
+        else:
+            result.append(current)
+            current = ins
+
+    if current:
+        result.append(current)
+
+    return result
+
+
 def normalize_history_value(value):
-    return str(value).strip()
+    raw_value = str(value).strip()
+    try:
+        if "E+" in raw_value.upper():
+            normalized_value = str(int(float(raw_value)))
+        else:
+            normalized_value = raw_value
+    except Exception as e:
+        logging.error(
+            f"TIME_NORMALIZE_ERROR raw={raw_value} error={e}"
+        )
+        return None
+
+    if len(normalized_value) != 14 or not normalized_value.isdigit():
+        logging.error(
+            f"TIME_FORMAT_ERROR raw={raw_value} normalized={normalized_value}"
+        )
+        return None
+
+    return normalized_value
 
 def retry_move_later(path, delay=5):
     def _retry():
@@ -57,17 +96,24 @@ class CSVHandler(FileSystemEventHandler):
             {normalize_key_tuple(key) for key in inflight_keys}
             if inflight_keys is not None else set()
         )
+        self.inflight_lock = threading.Lock()
+        self.pending_jobs = {}
+        self.process_count = {}
 
     def normalize_key(self, filename):
         return filename.strip().lower()
 
     def enqueue_with_inflight(self, data, key, retry_count=0):
         key = normalize_key_tuple(key)
-        self.inflight_keys.add(key)
+        with self.inflight_lock:
+            self.inflight_keys.add(key)
+
+
         try:
             enqueue(data, key, retry_count=retry_count)
         except Exception:
-            self.inflight_keys.discard(key)
+            with self.inflight_lock:
+                self.inflight_keys.discard(key)
             raise
 
 
@@ -152,27 +198,16 @@ class CSVHandler(FileSystemEventHandler):
             logging.warning(f"SKIP_ALREADY_MOVED {path}")
             return "FILE_NOT_FOUND"
 
-        
-
-        # ===== ro_noチェック =====
-        ro_no_raw = data.get("ro_no")
-
-        logging.info(f"RO_NO_CHECK {ro_no_raw} FILE {path}")  # ← ★追加
-
-        if not ro_no_raw:
-            logging.warning(f"SKIP_NO_RO_NO {path}")
-            return False
-
-
         instruction_no = data["instruction_no"]
         start_time = data["start_time"]
+        end_time = data["end_time"]
         queue_key = normalize_key_tuple((instruction_no, start_time))
         syori_name = data["syori_name"]
         reikyakku_name = data["reikyakku_name"]
         path = data["path"]
         if not instruction_no or not start_time:
             logging.error("CSV_INVALID_DATA")
-            return None
+            return "NO_RETRY"
         try:
             filename = os.path.basename(path)
             target = None
@@ -182,23 +217,30 @@ class CSVHandler(FileSystemEventHandler):
                     break
             if not target:
                 logging.error(f"UNKNOWN_CSV_FILE {filename}")
-                return False
+                return "NO_RETRY"
 
             ip = target["ip"]
             port = target["port"]
-            text = f"{syori_name} {reikyakku_name}"
+            group_no = target["group_no"]
+            text = instruction_no
             logging.info(f"SEND_START ip={ip} text={text}")
             success = send_with_retry(
                 ip,
                 port,
                 text,
-                1,
+                group_no,
                 100
             )
             if success:
                 logging.info(f"SEND_SUCCESS {ip} FILE {path}")
-                self.sent_history.add(queue_key)
+                self.process_count.setdefault(path, 0)
+                self.process_count[path] += 1
 
+                if self.process_count[path] >= data["total"]:
+                    logging.info(f"CSV_ALL_SENT {path}")
+                    move_csv_done(path)
+
+                # ★ DB保存は成功条件の一部にする
                 try:
                     insert_csv_history(
                         CHECK_DB_PATH,
@@ -207,6 +249,7 @@ class CSVHandler(FileSystemEventHandler):
                     )
                 except Exception as e:
                     logging.error(f"CSV_HISTORY_SAVE_ERROR {path} {e}")
+                    logging.error(f"CSV_HISTORY_SAVE_SKIP_RETRY {path}")
 
                 key = self.normalize_key(filename)
                 try:
@@ -217,14 +260,6 @@ class CSVHandler(FileSystemEventHandler):
                         logging.warning(f"STATE_SKIP_FILE_NOT_FOUND {path}")
                 except Exception as e:
                     logging.error(f"FILE_STATE_SAVE_ERROR {path} {e}")
-
-                try:
-                    moved = move_csv_done(path)
-                    if not moved:
-                        logging.warning(f"CSV_DONE_MOVE_PENDING {path}")
-                        retry_move_later(path)
-                except Exception as e:
-                    logging.error(f"CSV_DONE_MOVE_ERROR {path} {e}")
 
                 return True
 
@@ -237,7 +272,8 @@ class CSVHandler(FileSystemEventHandler):
                 logging.error(f"CSV_ERROR_MOVE_ERROR {path} {e}")
             return False
         finally:
-            self.inflight_keys.discard(queue_key)
+            with self.inflight_lock:
+                self.inflight_keys.discard(queue_key)
 
     # ==========================================================
     # CSV更新イベント処理
@@ -308,25 +344,46 @@ class CSVHandler(FileSystemEventHandler):
             return
 
         # ===== キー作成 =====
-        key = (data["instruction_no"], data["start_time"])
-        key = normalize_key_tuple(key)
+        split_list = split_instruction_list(data["instruction_list"])
+        error_moved = False
+        for instruction_group in split_list:
+            key = normalize_key_tuple((instruction_group, data["start_time"]))
+            # 重複チェック（ここでやるのが正解）
+            if key in self.sent_history:
+                logging.info(f"SKIP_SENT_HISTORY {key}")
+                try:
+                    if not error_moved:
+                        move_csv_error(data["path"])
+                        error_moved = True
+                except Exception as e:
+                    logging.error(f"CSV_ERROR_MOVE_FAIL {data['path']} {e}")
+                continue
 
-        # ===== 過去送信済みチェック =====
-        if key in self.sent_history:
-            logging.info(f"SKIP_SENT_HISTORY {key}")
-            return
+            if key in self.inflight_keys:
+                logging.info(f"SKIP_INFLIGHT {key}")
+                if not error_moved:
+                    move_csv_error(data["path"])
+                    error_moved = True
+                continue
 
-        # ===== 処理中キーの重複防止 =====
-        if key in self.inflight_keys:
-            logging.info(f"SKIP_INFLIGHT {key}")
-            return
+            if key in load_queue_keys():
+                logging.info(f"SKIP_QUEUED {key}")
+                if not error_moved:
+                    move_csv_error(data["path"])
+                    error_moved = True
+                continue
 
-        if key in load_queue_keys():
-            logging.info(f"SKIP_QUEUED {key}")
-            return
+            if key in self.pending_jobs:
+                logging.info(f"SCHEDULE_DUPLICATE_SKIP key={key}")
+                continue
 
-        # ===== ここで送信キューに送る =====
-        self.enqueue_with_inflight(data, key)
+            self.pending_jobs[key] = {
+                **data,
+                "instruction_no": instruction_group,
+                "total": len(split_list)
+            }
+
+            logging.info(f"JOB_REGISTERED key={key} end_time={data['end_time']}")
 
     # ==========================================================
     # CSV読み込み処理
@@ -338,7 +395,7 @@ class CSVHandler(FileSystemEventHandler):
 def read_csv_and_process(path):
     # 処理開始
     try:
-        with open(path, newline='', encoding="cp932") as f:
+        with open(path, mode="r", newline="", encoding="cp932") as f:
 
             reader = csv.reader(f)
             rows = list(reader)
@@ -357,21 +414,41 @@ def read_csv_and_process(path):
             logging.error(f"CSV_READ_ERROR {path} {e}")
             return None
 
-    ro_no = row[R_RO_NO]
-    instruction_no = row[R_INSTRUCTION_NO]
-    start_time = normalize_history_value(row[R_START_TIME])
+    # ===== 指示書No（0〜11列から取得）=====
+    instruction_list = []
+    seen_instruction = set()
+    for i in range(12):
+        val = str(row[i]).strip()
+        if val and val != "0" and val not in seen_instruction:
+            instruction_list.append(val)
+            seen_instruction.add(val)
+
+    if not instruction_list:
+        logging.info(f"SKIP_NO_INSTRUCTION {path}")
+        return None
+    
+    raw_start_time = str(row[R_START_TIME]).strip()
+    raw_end_time = str(row[R_END_TIME]).strip()
+
+    start_time = normalize_history_value(raw_start_time)
+    end_time = normalize_history_value(raw_end_time)
+    if start_time is None or end_time is None:
+        logging.error(
+            f"CSV_SKIP_INVALID_TIME path={path} start_raw={raw_start_time} end_raw={raw_end_time}"
+        )
+        return None
     syori_name = row[R_SYORI_NAME]
     reikyakku_name = row[R_REIKYAKU_NAME]
 
     data = {
-                "ro_no": ro_no,
-                "instruction_no": instruction_no,
+                "instruction_list": instruction_list,
                 "start_time": start_time,
+                "end_time": end_time,   # ★追加
                 "syori_name": syori_name,
                 "reikyakku_name": reikyakku_name,
                 "path": path
             }
-    logging.info(f"DATA_CREATED ro_no={data.get('ro_no')} FILE={path}")  # ← ★追加
+    logging.info(f"DATA_CREATED instruction={data.get('instruction_list')} FILE={path}")  # ← ★追加
     return data
 
 
@@ -380,6 +457,11 @@ def start_csv_watch(handler):
     observer = Observer()
     observer.schedule(handler, path=WATCH_FOLDER, recursive=False)
     observer.start()
+    threading.Thread(
+    target=schedule_loop,
+    args=(handler,),
+    daemon=True
+).start()
 
     # ==========================================================
     # CSV取りこぼし防止スキャン
@@ -432,17 +514,39 @@ def start_csv_watch(handler):
                     data = read_csv_and_process(path)
                     if not data:
                         continue
-                    key = normalize_key_tuple((data["instruction_no"], data["start_time"]))
-                    if key in handler.sent_history:
-                        logging.info(f"SCAN_SKIP_SENT_HISTORY {key}")
-                        continue
-                    if key in handler.inflight_keys:
-                        logging.info(f"SCAN_SKIP_INFLIGHT {key}")
-                        continue
-                    if key in load_queue_keys():
-                        logging.info(f"SCAN_SKIP_QUEUED {key}")
-                        continue
-                    handler.enqueue_with_inflight(data, key)
+                    split_list = split_instruction_list(data["instruction_list"])
+
+                    error_moved = False
+                    for instruction_group in split_list:
+                        key = normalize_key_tuple((instruction_group, data["start_time"]))
+
+                        if key in handler.sent_history:
+                            logging.info(f"SCAN_SKIP_SENT_HISTORY {key}")
+                            try:
+                                if not error_moved:
+                                    move_csv_error(path)
+                                    error_moved = True
+                            except Exception as e:
+                                logging.error(f"CSV_ERROR_MOVE_FAIL {path} {e}")
+                                continue
+                        if key in handler.inflight_keys:
+                            logging.info(f"SCAN_SKIP_INFLIGHT {key}")
+                            continue
+                        if key in load_queue_keys():
+                            logging.info(f"SCAN_SKIP_QUEUED {key}")
+                            continue
+
+                        if key in handler.pending_jobs:
+                            logging.info(f"SCHEDULE_DUPLICATE_SKIP key={key}")
+                            continue
+
+                        handler.pending_jobs[key] = {
+                            **data,
+                            "instruction_no": instruction_group,
+                            "total": len(split_list)
+                        }
+
+                        logging.info(f"SCAN_JOB_REGISTERED key={key} end_time={data['end_time']}")
 
             except Exception as e:
                 logging.error(f"CSV_SCAN_ERROR {e}")
@@ -474,4 +578,40 @@ def start_csv_watch(handler):
     t.start()
 
     while True:
+        time.sleep(1)
+
+
+def schedule_loop(handler):
+    while True:
+        now = datetime.now()
+
+        for key, data in list(handler.pending_jobs.items()):
+            end_time_str = data.get("end_time")
+
+            if not end_time_str:
+                continue
+
+            normalized_end_time = normalize_history_value(str(end_time_str).strip())
+            if normalized_end_time is None:
+                logging.error(
+                    f"SCHEDULE_SKIP_INVALID_END_TIME key={key} raw={end_time_str}"
+                )
+                del handler.pending_jobs[key]
+                continue
+
+            try:
+                end_time = datetime.strptime(normalized_end_time, "%Y%m%d%H%M%S")
+            except Exception as e:
+                logging.error(
+                    f"END_TIME_PARSE_ERROR key={key} raw={end_time_str} normalized={normalized_end_time} error={e}"
+                )
+                del handler.pending_jobs[key]
+                continue
+
+            if now >= end_time:
+                logging.info(f"SCHEDULE_TRIGGER key={key}")
+
+                handler.enqueue_with_inflight(data, key)
+                del handler.pending_jobs[key]
+
         time.sleep(1)

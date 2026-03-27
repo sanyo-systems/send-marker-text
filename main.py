@@ -5,6 +5,7 @@ import signal
 import sys
 import threading
 import time
+from datetime import datetime
 
 import psutil
 
@@ -12,8 +13,10 @@ from communication.send_queue import enqueue, load_queue, save_queue, start_work
 from csv_monitor.csv_watcher import (
     CSVHandler,
     WATCH_FOLDER,
+    normalize_history_value,
     read_csv_and_process,
     start_csv_watch,
+    split_instruction_list
 )
 from csv_monitor.retry_worker import retry_loop
 from history.sent_history import load_history
@@ -84,7 +87,11 @@ def check_single_instance():
     if pid_info:
         try:
             process = psutil.Process(pid_info["pid"])
-            if abs(process.create_time() - pid_info["create_time"]) < 1:
+            same_process = (
+                abs(process.create_time() - pid_info["create_time"]) < 1
+                and process.name() == pid_info["process_name"]
+            )
+            if same_process:
                 print("既に起動しています")
                 sys.exit()
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
@@ -129,6 +136,8 @@ def watchdog_recovery(handler, threads):
 
 
 def startup_csv_check(handler, queued_keys):
+    now = datetime.now()
+
     for file_name in os.listdir(WATCH_FOLDER):
         if not file_name.lower().endswith(".csv"):
             continue
@@ -139,14 +148,63 @@ def startup_csv_check(handler, queued_keys):
             if not data:
                 continue
 
-            key = normalize_key_tuple((data["instruction_no"], data["start_time"]))
-            if key in handler.sent_history or key in handler.inflight_keys or key in queued_keys:
+            end_time_str = data.get("end_time")
+            if not end_time_str:
+                logging.info(f"STARTUP_SKIP_NO_END_TIME path={path}")
                 continue
 
-            enqueue_with_inflight(handler, data, key, queued_keys=queued_keys)
-            queued_keys.add(key)
+            normalized_end_time = normalize_history_value(str(end_time_str).strip())
+            if normalized_end_time is None:
+                logging.error(
+                    f"STARTUP_SKIP_INVALID_END_TIME path={path} raw={end_time_str}"
+                )
+                continue
+
+            try:
+                end_time = datetime.strptime(normalized_end_time, "%Y%m%d%H%M%S")
+            except Exception as e:
+                logging.error(
+                    f"STARTUP_END_TIME_PARSE_ERROR path={path} end_time={end_time_str} error={e}"
+                )
+                continue
+
+            # ===== 修正：まとめ送信対応 =====
+            split_list = split_instruction_list(data["instruction_list"])
+
+            for instruction_group in split_list:
+                key = normalize_key_tuple((instruction_group, data["start_time"]))
+
+                if key in handler.sent_history or key in handler.inflight_keys or key in queued_keys:
+                    continue
+
+                send_data = {
+                    **data,
+                    "instruction_no": instruction_group,
+                    "total": len(split_list)
+                }
+
+                if now >= end_time:
+                    enqueue_with_inflight(handler, send_data, key, queued_keys=queued_keys)
+                    queued_keys.add(key)
+                    logging.info(
+                        f"STARTUP_IMMEDIATE_ENQUEUE key={key} end_time={normalized_end_time}"
+                    )
+                    continue
+
+                if key in handler.pending_jobs:
+                    logging.info(f"STARTUP_DUPLICATE_PENDING_SKIP key={key}")
+                    continue
+
+                handler.pending_jobs[key] = send_data
+                logging.info(
+                    f"STARTUP_PENDING_REGISTERED key={key} end_time={normalized_end_time}"
+                )
+
+
         except Exception as e:
             logging.error(f"STARTUP_CSV_ERROR {e}")
+
+
 
 
 def start_csv_thread(handler):
@@ -175,7 +233,7 @@ if __name__ == "__main__":
     reconcile_state(handler)
 
     startup_csv_check(handler, restored_inflight_keys)
-    start_worker(handler.process_csv_data)
+    start_worker(handler.process_csv_data, sent_history=handler.sent_history)
 
     retry_thread = threading.Thread(
         target=retry_loop,
