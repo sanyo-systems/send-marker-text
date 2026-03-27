@@ -10,7 +10,7 @@ NEW_EXE = os.path.join(BASE_DIR, "main_new.exe")
 OLD_EXE = os.path.join(BASE_DIR, "main_old.exe")
 
 VERSION_FILE = os.path.join(BASE_DIR, "version.txt")
-NEW_VERSION_FILE = os.path.join(BASE_DIR, "version_new.txt")
+# NEW_VERSION_FILE = os.path.join(BASE_DIR, "version_new.txt")
 
 
 def read_version(path):
@@ -22,7 +22,10 @@ def read_version(path):
 
 def update():
     current_version = read_version(VERSION_FILE)
-    new_version = read_version(NEW_VERSION_FILE)
+    # new_version = read_version(NEW_VERSION_FILE)
+
+    # ZIP展開後の version.txt を使用
+    new_version = read_version(VERSION_FILE)
 
     print(f"current={current_version} new={new_version}")
 
@@ -45,8 +48,8 @@ def update():
         # 新しいexe適用
         os.rename(NEW_EXE, MAIN_EXE)
 
-        # version更新
-        os.replace(NEW_VERSION_FILE, VERSION_FILE)
+        # # version更新
+        # os.replace(NEW_VERSION_FILE, VERSION_FILE)
 
         print("アップデート成功")
 
