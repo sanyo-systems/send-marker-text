@@ -58,7 +58,10 @@ def _persist_success(key, sent_history):
     key = normalize_key_tuple(key)
     sent_history.add(key)
     save_history(sent_history)
-    remove_failed(key)
+    try:
+        remove_failed(key)
+    except Exception as e:
+        logging.error(f"FAILED_CLEANUP_ERROR key={key} {e}")
     _remove_from_persistent_queue(key)
 
 
@@ -72,6 +75,12 @@ def _persist_failure(data, key, retry_count):
     _remove_from_persistent_queue(key)
 
 
+def _drop_without_retry(key):
+    key = normalize_key_tuple(key)
+    remove_failed(key)
+    _remove_from_persistent_queue(key)
+
+
 def enqueue(data, key, retry_count=0):
     key = normalize_key_tuple(key)
     max_queue_size = 1000
@@ -80,22 +89,33 @@ def enqueue(data, key, retry_count=0):
 
     queue_item = (data, key, retry_count)
     logging.info(f"ENQUEUE_START key={key} retry={retry_count}")
-    send_queue.put(queue_item)
-    with queue_lock:
-        queue_data = load_queue()
-        queue_data.append({
-            "data": data,
-            "key": list(key),
-            "retry": retry_count
-        })
-        save_queue(queue_data)
+    # ★ 先に永続化（失敗したら何も起きない）
+    try:
+        with queue_lock:
+            queue_data = load_queue()
+            queue_data.append({
+                "data": data,
+                "key": list(key),
+                "retry": retry_count
+            })
+            save_queue(queue_data)
+    except Exception as e:
+        logging.error(f"ENQUEUE_PERSIST_FAILED key={key} {e}")
+        raise
+
+    try:
+        send_queue.put_nowait(queue_item)
+    except Exception:
+        logging.error(f"ENQUEUE_ROLLBACK key={key} retry={retry_count}")
+        _remove_from_persistent_queue(key)
+        raise
     logging.info(
         f"ENQUEUE_DONE key={key} retry={retry_count} qsize={send_queue.qsize()}"
     )
 
 
-def start_worker(process_func):
-    sent_history = load_history()
+def start_worker(process_func, sent_history=None):
+    sent_history = sent_history if sent_history is not None else load_history()
     logging.info("SEND_WORKER_STARTED")
     for item in load_queue():
         send_queue.put((
@@ -126,9 +146,19 @@ def start_worker(process_func):
                     f"WORKER_RESULT key={key} retry={retry_count} success={success}"
                 )
                 if success is True:
-                    _persist_success(key, sent_history)
-                else:
+                    try:
+                        _persist_success(key, sent_history)
+                    except Exception as e:
+                        logging.critical(
+                            f"SUCCESS_FINALIZE_ERROR key={key} retry={retry_count} {e}"
+                        )
+                elif success is False:
                     _persist_failure(data, key, retry_count)
+                else:
+                    logging.info(
+                        f"WORKER_SKIP_RETRY key={key} retry={retry_count} result={success}"
+                    )
+                    _drop_without_retry(key)
             except Exception as e:
                 logging.error(f"SEND_WORKER_ERROR key={key} retry={retry_count} {e}")
                 _persist_failure(data, key, retry_count)
