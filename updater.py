@@ -54,6 +54,14 @@ def _clear_install_dir(install_dir: Path, keep_names: set[str]) -> None:
         if item.name == "Monitoring":
             continue
 
+        # ★ ログフォルダも削除しない
+        if item.name == "logs":
+            continue
+
+        # ★ Accessファイルは削除しない
+        if item.suffix.lower() == ".accdb":
+            continue
+
         if item.name in keep_names:
             continue
         if item.is_dir():
