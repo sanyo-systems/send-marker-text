@@ -82,25 +82,27 @@ def run_update(
     shutil.copy2(package, copied_zip)
     log(f"ZIPコピー完了: {copied_zip}")
 
-    with zipfile.ZipFile(copied_zip, "r") as zf:
-        zf.extractall(extracted_dir)
-    log(f"ZIP展開完了: {extracted_dir}")
+    # exe直接コピー方式
+    source_exe = copied_zip
+    target_exe = install_dir / app_exe
 
-    source_dir = extracted_dir
-    entries = list(extracted_dir.iterdir())
-    if len(entries) == 1 and entries[0].is_dir():
-        source_dir = entries[0]
-    log(f"コピー元ディレクトリ: {source_dir}")
- 
     _copy_tree(install_dir, backup_dir)
     log(f"バックアップ完了: {backup_dir}")
 
     keep_names = {"updater.exe", "updater_main.exe", "update.log"}
 
     try:
-        _clear_install_dir(install_dir, keep_names)
-        _copy_tree(source_dir, install_dir)
-        log("新ファイル配置完了")
+        # 先に一時ファイルへコピー
+        temp_exe = install_dir / "main_new.exe"
+        shutil.copy2(source_exe, temp_exe)
+
+        # 旧exe削除
+        if target_exe.exists():
+            target_exe.unlink()
+
+        # 新exe適用
+        temp_exe.rename(target_exe)
+        log("main.exe 更新完了")
 
         version_path = install_dir / version_file
         version_path.write_text(target_version, encoding="utf-8")

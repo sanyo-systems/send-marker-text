@@ -7,11 +7,11 @@ from datetime import datetime
 
 BASE_DIR = Path(r"C:\SendMarkerText\sendpython")
 
-GITHUB_ZIP_URL = "https://github.com/sanyo-systems/send-marker-text/archive/refs/heads/main.zip"
-VERSION_URL = "https://raw.githubusercontent.com/sanyo-systems/send-marker-text/refs/heads/main/version.txt?"
+GITHUB_ZIP_URL = "https://github.com/sanyo-systems/send-marker-text/raw/main/release/main.exe"
+VERSION_URL = "https://raw.githubusercontent.com/sanyo-systems/send-marker-text/main/release/version.txt"
 
 
-TEMP_ZIP = BASE_DIR / "update.zip"
+TEMP_EXE = BASE_DIR / "main_download.exe"
 VERSION_FILE = BASE_DIR / "version.txt"
 
 UPDATER_EXE = BASE_DIR / "updater.exe"
@@ -30,8 +30,8 @@ def download_zip():
     log("ダウンロード開始")
     res = requests.get(GITHUB_ZIP_URL)
     res.raise_for_status()
-    TEMP_ZIP.write_bytes(res.content)
-    log(f"ZIP保存完了: {TEMP_ZIP}")
+    TEMP_EXE.write_bytes(res.content)
+    log(f"ZIP保存完了: {TEMP_EXE}")
 
 def get_remote_version():
     res = requests.get(VERSION_URL)
@@ -62,7 +62,7 @@ def main():
             str(UPDATER_EXE),
             "--pid", str(os.getpid()),
             "--install-dir", str(BASE_DIR),
-            "--package", str(TEMP_ZIP),
+            "--package", str(TEMP_EXE),
             "--app-exe", "main.exe",
             "--version-file", "version.txt",
             "--target-version", remote_version
