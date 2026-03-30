@@ -49,6 +49,11 @@ def _clear_install_dir(install_dir: Path, keep_names: set[str]) -> None:
     if not install_dir.exists():
         return
     for item in install_dir.iterdir():
+
+        # ★ CSVフォルダは削除しない
+        if item.name == "Monitoring":
+            continue
+
         if item.name in keep_names:
             continue
         if item.is_dir():
