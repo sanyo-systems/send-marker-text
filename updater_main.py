@@ -8,7 +8,7 @@ from datetime import datetime
 BASE_DIR = Path(r"C:\SendMarkerText\sendpython")
 
 GITHUB_ZIP_URL = "https://github.com/sanyo-systems/send-marker-text/archive/refs/heads/main.zip"
-VERSION_URL = "https://raw.githubusercontent.com/sanyo-systems/send-marker-text/refs/heads/main/version.txt?token=GHSAT0AAAAAADYDNDTCIEYWPVT4PLQPOR462OJX56Q"
+VERSION_URL = "https://raw.githubusercontent.com/sanyo-systems/send-marker-text/refs/heads/main/version.txt?"
 
 
 TEMP_ZIP = BASE_DIR / "update.zip"
