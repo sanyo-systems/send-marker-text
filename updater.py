@@ -16,7 +16,6 @@ LOG_FILE = Path(r"C:\SendMarkerText\sendpython\update.log")
 def log(message: str) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"{timestamp} [updater] {message}"
-    print(line)
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
