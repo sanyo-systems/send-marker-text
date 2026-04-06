@@ -104,13 +104,38 @@ def build_ui(rec_type="PIT"):
     root = tk.Tk()
     version = load_version()
     root.title(f"記録計通信ソフト ver {version}")
+    root.grid_rowconfigure(0, weight=1)
+    root.grid_columnconfigure(0, weight=1)
+
+    canvas = tk.Canvas(root, highlightthickness=0)
+    v_scrollbar = ttk.Scrollbar(root, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=v_scrollbar.set)
+
+    canvas.grid(row=0, column=0, sticky="nsew")
+    v_scrollbar.grid(row=0, column=1, sticky="ns")
+
+    content_frame = ttk.Frame(canvas)
+    canvas_window = canvas.create_window((0, 0), window=content_frame, anchor="nw")
+
+    def on_content_configure(event):
+        canvas.configure(scrollregion=canvas.bbox("all"))
+
+    def on_canvas_configure(event):
+        canvas.itemconfigure(canvas_window, width=event.width)
+
+    def on_mousewheel(event):
+        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    content_frame.bind("<Configure>", on_content_configure)
+    canvas.bind("<Configure>", on_canvas_configure)
+    canvas.bind_all("<MouseWheel>", on_mousewheel)
 
     # 左右の親フレームを作る
     # 左フレーム
-    left_frame = ttk.Frame(root)
+    left_frame = ttk.Frame(content_frame)
     left_frame.grid(row=0, column=0, sticky="n")
     # 右フレーム
-    right_frame = ttk.Frame(root)
+    right_frame = ttk.Frame(content_frame)
     right_frame.grid(row=0, column=1, sticky="n")
 
 
