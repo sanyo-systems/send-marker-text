@@ -16,7 +16,7 @@ def move_csv_done(path):
 
     for i in range(10):
         try:
-            shutil.move(path, new_path)
+            shutil.copy2(path, new_path)
             logging.info(f"CSV_MOVE_DONE {path} -> {new_path}")
             return True
         except PermissionError as e:
@@ -40,7 +40,7 @@ def move_csv_error(path):
 
     for i in range(10):
         try:
-            shutil.move(path, new_path)
+            shutil.copy2(path, new_path)
             logging.info(f"CSV_MOVE_ERROR {path} -> {new_path}")
             return True
         except PermissionError as e:
