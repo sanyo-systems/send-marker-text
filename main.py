@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 from datetime import datetime
-
+import configparser
 import psutil
 
 from communication.send_queue import enqueue, load_queue, save_queue, start_worker
@@ -28,7 +28,6 @@ from utils.key_utils import normalize_key_tuple
 from state_reconciler import reconcile_state
 
 PID_FILE = "app.pid"
-
 
 def enqueue_with_inflight(handler, data, key, queued_keys=None, retry_count=0):
     key = normalize_key_tuple(key)
@@ -92,7 +91,6 @@ def check_single_instance():
                 and process.name() == pid_info["process_name"]
             )
             if same_process:
-                print("既に起動しています")
                 sys.exit()
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
@@ -150,7 +148,6 @@ def startup_csv_check(handler, queued_keys):
 
             end_time_str = data.get("end_time")
             if not end_time_str:
-                logging.info(f"STARTUP_SKIP_NO_END_TIME path={path}")
                 continue
 
             normalized_end_time = normalize_history_value(str(end_time_str).strip())
@@ -186,19 +183,12 @@ def startup_csv_check(handler, queued_keys):
                 if now >= end_time:
                     enqueue_with_inflight(handler, send_data, key, queued_keys=queued_keys)
                     queued_keys.add(key)
-                    logging.info(
-                        f"STARTUP_IMMEDIATE_ENQUEUE key={key} end_time={normalized_end_time}"
-                    )
                     continue
 
                 if key in handler.pending_jobs:
-                    logging.info(f"STARTUP_DUPLICATE_PENDING_SKIP key={key}")
                     continue
 
                 handler.pending_jobs[key] = send_data
-                logging.info(
-                    f"STARTUP_PENDING_REGISTERED key={key} end_time={normalized_end_time}"
-                )
 
 
         except Exception as e:
@@ -272,8 +262,19 @@ if __name__ == "__main__":
     )
     watchdog_thread.start()
 
+    config = configparser.ConfigParser()
+    config.read("setting.ini", encoding="shift_jis")
+
+    ui_rec_type = config.get("SECTION_1", "UI_REC_TYPE", fallback="PIT")
+    # 🔥 安全化（重要）
+    ui_rec_type = ui_rec_type.upper()
+    if ui_rec_type not in ("PIT", "BATCH"):
+        logging.error(f"INVALID UI_REC_TYPE: {ui_rec_type} → fallback PIT")
+        ui_rec_type = "PIT"
+
+
     try:
-        app = build_ui()
+        app = build_ui(ui_rec_type)
         app.mainloop()
     finally:
         _remove_pid_file()

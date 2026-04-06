@@ -13,7 +13,6 @@ recorder_log.txt
 Setting.ini
 
 # pyinstaller main.py --onedir --noconsole --cleanで作成したソフトとフォルダー
-main.exe
 dist/
 build/
 

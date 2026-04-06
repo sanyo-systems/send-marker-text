@@ -1,4 +1,5 @@
 import tkinter as tk
+import os
 import threading
 import logging
 from collections import defaultdict
@@ -18,8 +19,18 @@ from csv_monitor.csv_watcher import start_csv_watch, CSVHandler
 from communication.send_queue import start_worker
 from csv_monitor.retry_worker import retry_loop
 from monitoring.health_monitor import heartbeat_loop
-from communication.config_loader import ACCESS_FILE_2, ACCESS_FILE
+from communication.config_loader import ACCESS_FILE_2, ACCESS_FILE, RECORDER_CONFIG
 
+
+def load_version():
+    try:
+        path = r"C:\SendMarkerText\sendpython\version.txt"
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read().strip()
+    except Exception:
+        pass
+    return "unknown"
 # =========================================================
 # Access DB設定
 # 1H/4Hチェック履歴および社員番号マスタのDBパス
@@ -27,8 +38,7 @@ from communication.config_loader import ACCESS_FILE_2, ACCESS_FILE
 CHECK_DB_PATH = ACCESS_FILE_2
 EMP_DB_PATH = ACCESS_FILE
 
-# 炉名リスト
-inter = ["PG-1", "PG-2", "PG-3", "PG-4","PG-5", "SQ-1","SQ-2", "SQ-3", "油槽"]
+
 
 # =========================================================
 # setting.ini 読み込み
@@ -54,13 +64,46 @@ def start_csv_thread(handler):
 # ・CSV送信履歴確認
 # ・記録計送信状態確認
 # =========================================================
-def build_ui():
+def build_ui(rec_type="PIT"):
+    # ===== 炉リスト =====
+    if rec_type == "PIT":
+        inter = ["PG-1", "PG-2", "PG-3", "PG-4","PG-5", "SQ-1","SQ-2", "SQ-3", "油槽"]
+    else:
+        inter = ["NG-1", "TG-2"]
 
+    def normalize_furnace_name(csv_file):
+        if not csv_file:
+            return ""
+        name = os.path.splitext(os.path.basename(csv_file))[0]
+        if name.upper().startswith("RE"):
+            name = name[2:]
+        return name
+
+    ui_recorder_config = [
+        rec for rec in RECORDER_CONFIG
+        if rec.get("type", "PIT").upper() == rec_type.upper()
+    ]
+
+    config_map = {
+        normalize_furnace_name(rec["file"]): rec
+        for rec in ui_recorder_config
+        if normalize_furnace_name(rec["file"])
+    }
+
+    def get_recorder_config(furnace_name):
+        return config_map.get(furnace_name)
+
+    # 🔥 炉設定（将来拡張用）
+    furnace_config = [
+        {"name": name, "type": rec_type}
+        for name in inter
+    ]
     # =====================================================
     # メインウィンドウ作成
     # =====================================================
     root = tk.Tk()
-    root.title("記録計通信ソフト_py.ver1.0")
+    version = load_version()
+    root.title(f"記録計通信ソフト ver {version}")
 
     # 左右の親フレームを作る
     # 左フレーム
@@ -69,18 +112,30 @@ def build_ui():
     # 右フレーム
     right_frame = ttk.Frame(root)
     right_frame.grid(row=0, column=1, sticky="n")
+
+
+    # ===== 炉種表示 =====
+    color = "blue" if rec_type == "PIT" else "green"
+    furnace_label = ttk.Label(
+        left_frame,
+        text=f"炉種：{rec_type}",
+        foreground=color,
+        font=("Arial", 12, "bold")
+    )
+    furnace_label.grid(row=0, column=0, sticky="w", padx=5)
+
     # =====================================================
     # 入力関連フレーム
     # =====================================================
     # 1H/4Hチェック枠
     input_frame = ttk.LabelFrame(left_frame, text="1H/4Hチェック")
-    input_frame.grid(row=0, column=0, padx=10, pady=10)
+    input_frame.grid(row=1, column=0, padx=10, pady=10)
     # 任意コメント枠
     coment_frame = ttk.LabelFrame(left_frame, text="任意コメント")
-    coment_frame.grid(row=1, column=0, padx=10, pady=10)
+    coment_frame.grid(row=2, column=0, padx=10, pady=10)
     # 送信内容予約枠
     appoint_frame = ttk.LabelFrame(left_frame, text="送信内容予約")
-    appoint_frame.grid(row=2, column=0, padx=10, pady=10)
+    appoint_frame.grid(row=3, column=0, padx=10, pady=10)
     # 1Hチェック履歴枠
     one_check_frame = ttk.LabelFrame(right_frame, text="1Hチェック履歴")
     one_check_frame.grid(row=0, column=0, padx=10, pady=10)
@@ -112,49 +167,29 @@ def build_ui():
     ttk.Label(input_frame, text="稼働").grid(row=0, column=0)
     ttk.Label(input_frame, text=f"炉名").grid(row=0, column=1)
     ttk.Label(input_frame, text=f"測定温度").grid(row=0, column=2)
-    ttk.Label(input_frame, text="稼働").grid(row=0, column=3)
-    ttk.Label(input_frame, text=f"炉名").grid(row=0, column=4)
-    ttk.Label(input_frame, text=f"測定温度").grid(row=0, column=5)
     # 炉ごとの設定温度と測定温度の欄作成
-    for i in range(9):
+    for i in range(len(inter)):
         var = tk.BooleanVar(value=True)  # とりあえず最初は稼働ONにする（必要ならFalse）
         run_vars.append(var)
-        if i < 5:
-            # .grid()は場所の配置、ここを調整するrowで縦、columnで横
-            # PG-1 ~ PG-5
-            ttk.Label(input_frame, text=f"PG-{i + 1}").grid(row=i + 1, column=1)
-        elif i > 4 and i < 8:
-            # SQ-1 ~ SQ-3
-            ttk.Label(input_frame, text=f"SQ-{i - 4}").grid(row=i - 4, column=4)
-        else:
-            # 油槽
-            ttk.Label(input_frame, text=f"油槽").grid(row=i - 4, column=4)
         # 炉の番号
         ro = i
-        # PG-1 ~ PG-5
-        if i < 5:
-            # 稼働化を示すチェックボックス
-            chk = ttk.Checkbutton(input_frame, variable=var)
-            chk.grid(row=i + 1, column=0)
-            # 測定温度
-            e_act = ttk.Entry(input_frame, width=6)
-            e_act.grid(row=i + 1, column=2)
-        # SQ-1 ~ SQ-3, 油槽
-        else:
-            chk = ttk.Checkbutton(input_frame, variable=var)
-            chk.grid(row=i - 4, column=3)
-            e_act = ttk.Entry(input_frame, width=6)
-            e_act.grid(row=i - 4, column=5)
+        # ===== 全炉共通レイアウト（縦並び）=====
+        ttk.Label(input_frame, text=inter[i], font=("Arial", 10, "bold")).grid(row=i+1, column=1)
+
+        chk = ttk.Checkbutton(input_frame, variable=var)
+        chk.grid(row=i + 1, column=0)
+        e_act = ttk.Entry(input_frame, width=8)
+        e_act.grid(row=i + 1, column=2)
         # リストにactで各々まとめる
         entry_ro_list.append(ro)
         entry_act_list.append(e_act)
     
     # 入力者　入力欄作成
     ttk.Label(input_frame, text="1Hチェック確認者").grid(row=10, column=0)
-    one_person = ttk.Entry(input_frame, width=6)
+    one_person = ttk.Entry(input_frame, width=8)
     one_person.grid(row=10, column=1)
     ttk.Label(input_frame, text="4Hチェック確認者").grid(row=10, column=2)
-    four_person = ttk.Entry(input_frame, width=6)
+    four_person = ttk.Entry(input_frame, width=8)
     four_person.grid(row=10, column=3)
 
 
@@ -175,19 +210,10 @@ def build_ui():
     prev_data_time = []
     prev_ipadress = []
     # 炉分の欄を作成
-    for i in range(9):
+    for i in range(len(inter)):
         # 炉名、NO 指示書No 送信日時: 2026/02/15 時間分秒 記録計: IPアドレス
         # を表示
-        if i < 5:
-            # .grid()は場所の配置、ここを調整するrowで縦、columnで横
-            # PG-1 ~ PG-5
-            ttk.Label(before_frame, text=f"PG-{i + 1}").grid(row=i, column=0)
-        elif i > 4 and i < 8:
-            # SQ-1 ~ SQ-3
-            ttk.Label(before_frame, text=f"SQ-{i - 4}").grid(row=i, column=0)
-        else:
-            # 油槽
-            ttk.Label(before_frame, text=f"油槽").grid(row=i, column=0)
+        ttk.Label(before_frame, text=inter[i]).grid(row=i, column=0)
         pg_no = i
         ttk.Label(before_frame, text="NO").grid(row=i, column=1)
         lbl_operate_NO = ttk.Label(before_frame, text="-")
@@ -218,14 +244,9 @@ def build_ui():
     ok_no_list_list_1h = []
     day_day_1h = ttk.Label(one_check_frame, text="-")
     day_day_1h.grid(row=0, column=0)
-    for ro in range(9):
+    for ro in range(len(inter)):
         ok_no_list = []
-        if ro < 5:
-            ttk.Label(one_check_frame, text=f"PG-{1 + ro}").grid(row=0, column=2 + ro)
-        elif ro > 4 and ro < 8:
-            ttk.Label(one_check_frame, text=f"SQ-{ro - 4}").grid(row=0, column=2 + ro)
-        else:
-            ttk.Label(one_check_frame, text=f"油槽").grid(row=0, column=2 + ro)
+        ttk.Label(one_check_frame, text=inter[ro]).grid(row=0, column=2 + ro)
         for i in range(24):
             ttk.Label(one_check_frame, text=f"{i}").grid(row=24 - i, column=1)
             ok_no = ttk.Label(one_check_frame, text="-")
@@ -253,7 +274,7 @@ def build_ui():
         day_day_1h.config(text=da_a)
 
         # まず全クリア
-        for ro in range(9):
+        for ro in range(len(inter)):
             for i in range(24):
                 ok_no_list_list_1h[ro][i].config(text="-")
 
@@ -264,7 +285,8 @@ def build_ui():
         )
 
         for furnace_name, hour in rows:
-        # ここで番号を炉名にする
+            if furnace_name not in inter:
+                continue
             col_index = inter.index(furnace_name)
         # hour時のリストをOKにする
             ok_no_list_list_1h[col_index][int(hour)].config(text="OK")
@@ -283,15 +305,10 @@ def build_ui():
     hour_list_list = []
     day_day_4h = ttk.Label(four__check_frame, text="-")
     day_day_4h.grid(row=0, column=0)
-    for ro in range(9):
+    for ro in range(len(inter)):
         ok_no_list = []
         hour_list = []
-        if ro < 5:
-            ttk.Label(four__check_frame, text=f"PG-{1 + ro}").grid(row=0, column=2 + ro)
-        elif ro > 4 and ro < 8:
-            ttk.Label(four__check_frame, text=f"SQ-{ro - 4}").grid(row=0, column=2 + ro)
-        else:
-            ttk.Label(four__check_frame, text=f"油槽").grid(row=0, column=2 + ro)
+        ttk.Label(four__check_frame, text=inter[ro]).grid(row=0, column=2 + ro)
         for i in range(8):
             hour = ttk.Label(four__check_frame, text="-")
             hour.grid(row=8 - i, column=1)
@@ -320,7 +337,7 @@ def build_ui():
         day_day_4h.config(text=da_a)
 
         # まず全クリア
-        for ro in range(9):
+        for ro in range(len(inter)):
             for i in range(8):
                 ok_no_list_list[ro][i].config(text="-")
                 hour_list_list[ro][i].config(text="-")
@@ -338,6 +355,8 @@ def build_ui():
 
         # 配置
         for furnace_name, hours in grouped.items():
+            if furnace_name not in inter:
+                continue
             col_index = inter.index(furnace_name)
 
             for row_index, hour in enumerate(hours[:8]):
@@ -362,31 +381,17 @@ def build_ui():
     # 現在は機能していないため、中止
     apo_list = []
     #　予約内容と取り消しボタン
-    for i in range(9):
-        if i <= 4:
-            ttk.Label(appoint_frame, text=f"PG-{i+1}").grid(row=i, column=0)
-            ttk.Label(appoint_frame, text="予約内容").grid(row=i, column=1)
-            lbl_apo = ttk.Label(appoint_frame, text="-")
-            lbl_apo.grid(row=i, column=2)
-        elif i <= 7:
-            ttk.Label(appoint_frame, text=f"SQ-{i-4}").grid(row=i - 5, column=4)
-            ttk.Label(appoint_frame, text="予約内容").grid(row=i - 5, column=5)
-            lbl_apo = ttk.Label(appoint_frame, text="-")
-            lbl_apo.grid(row=i - 5, column=6)
-        elif i == 8:
-            ttk.Label(appoint_frame, text=f"油槽").grid(row=i - 5, column=4)
-            ttk.Label(appoint_frame, text="予約内容").grid(row=i - 5, column=5)
-            lbl_apo = ttk.Label(appoint_frame, text="-")
-            lbl_apo.grid(row=i - 5, column=6)
+    for i, furnace in enumerate(inter):
+        ttk.Label(appoint_frame, text=furnace).grid(row=i, column=0)
+        ttk.Label(appoint_frame, text="予約内容").grid(row=i, column=1)
+        lbl_apo = ttk.Label(appoint_frame, text="-")
+        lbl_apo.grid(row=i, column=2)
         apo_list.append(lbl_apo)
 
     # 取り消しボタン
-    for i in range(9):
-        btn_ok = ttk.Button(appoint_frame, text=f"取消", command="")
-        if i <= 4:
-            btn_ok.grid(row=i, column=3)
-        else:
-            btn_ok.grid(row=i - 5, column=7)
+    for i in range(len(inter)):
+        btn_ok = ttk.Button(appoint_frame, text="取消", command="")
+        btn_ok.grid(row=i, column=3)
 
 
 
@@ -409,13 +414,17 @@ def build_ui():
         if not text.strip():
             messagebox.showwarning("入力エラー", "コメントを入力してください")
             return
+        furnace_name = inter_combo.get()
         select_no = inter_combo.current()
 
-        # setting.iniは1から開始
-        rec_no = int(select_no) + 1
-        # 炉番号は本来0~8だが、今回はiniで1~9とする
-        ip = config["SECTION_1"][f"RECORDER_IP_ADRESS{rec_no}"]
-        port = int(config["SECTION_1"][f"RECORDER_PORT{rec_no}"])
+        rec = get_recorder_config(furnace_name)
+        if not rec:
+            messagebox.showerror("設定エラー", f"{furnace_name}の設定が見つかりません")
+            return
+
+        rec_no = rec["group_no"]
+        ip = rec["ip"]
+        port = rec["port"]
         wait_time = int(config["SECTION_1"]["WAIT_TIME1"])
         # 保存
         try:
@@ -446,7 +455,7 @@ def build_ui():
     # 前回データの取得
     def before_data():
 
-        for i in range(9):
+        for i in range(len(inter)):
 
             row = load_latest_history(CHECK_DB_PATH, inter[i])
 
@@ -505,7 +514,15 @@ def build_ui():
         # entry_actから取得 zip(list1, list2)でfor i, h in zip()でその値を取得可能
         for ro, e_act in zip(entry_ro_list, entry_act_list):
             act_val = e_act.get()
-            all_list.append((ro, act_val))
+            furnace_name = inter[ro]
+
+            rec = get_recorder_config(furnace_name)
+            if not rec:
+                messagebox.showerror("設定エラー", f"{furnace_name}の設定が見つかりません")
+                return
+
+            ip = rec["ip"]
+            all_list.append((ro, act_val, ip))
         # 確認欄にある確認者
         one_val = one_person.get()
         four_val = four_person.get()
@@ -522,9 +539,9 @@ def build_ui():
         # validationの関数
         # 変数A and not 変数BでAは入力されているがBはされていないとなる
         if one_val and not four_val:
-            result, temp_dict = send_temp(all_list, one_val, now_str, hour, "1H")
+            result, temp_dict = send_temp(all_list, one_val, now_str, hour, "1H", inter)
         elif not one_val and four_val:
-            result, temp_dict = send_temp(all_list, four_val, now_str, hour, "4H")
+            result, temp_dict = send_temp(all_list, four_val, now_str, hour, "4H", inter)
         else:
             messagebox.showerror("エラー", "1Hか4Hどちらか一方のみ入力してください")
             return
