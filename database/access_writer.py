@@ -1,24 +1,7 @@
+import logging
+import os
 import pyodbc
 from datetime import datetime
-
-
-ipadress = [
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1",
-    "127.0.0.1"
-]
-
-# 炉名
-inter = [
-    "PG-1","PG-2","PG-3","PG-4","PG-5",
-    "SQ-1","SQ-2","SQ-3","油槽"
-]
 
 # ==========================================================
 # 社員番号から作業者名を取得
@@ -100,9 +83,12 @@ def insert_check_history_batch(check_db_path, emp_db_path, temp_dict):
                 ro_no = furnace["ro_no"]
                 act_temp = furnace["act_temp"]
 
-                furnace_name = inter[ro_no]
+                # 🔥 修正（これが本質）
+                furnace_name = furnace["furnace_name"]
                 textbox = f"ACT {act_temp}"
-                ip = ipadress[ro_no]
+
+                # ⚠ IPはとりあえずro_noでOK（後で改善可）
+                ip = furnace["ip"]
 
                 cur.execute(sql, (
                     now_dt,
@@ -134,6 +120,26 @@ def insert_check_history_batch(check_db_path, emp_db_path, temp_dict):
 # 送信結果の追跡やトラブル調査で使用する。
 # ==========================================================
 def insert_csv_history(db_path, data, ip):
+    path = data.get("path")
+    if not path:
+        logging.error("CSV_HISTORY_SAVE_ERROR path missing")
+        return
+
+    filename = os.path.basename(path)
+    name, ext = os.path.splitext(filename)
+
+    if ext.lower() != ".csv":
+        logging.error(f"CSV_HISTORY_SAVE_ERROR invalid file format: {path}")
+        return
+
+    furnace_name = name
+    if furnace_name.upper().startswith("RE"):
+        furnace_name = furnace_name[2:]
+
+    furnace_name = furnace_name.upper().strip()
+    if not furnace_name:
+        logging.error(f"CSV_HISTORY_SAVE_ERROR furnace name parse failed: {path}")
+        return
 
     conn = pyodbc.connect(
         r"DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
@@ -150,7 +156,7 @@ def insert_csv_history(db_path, data, ip):
 
     cur.execute(sql, (
         datetime.now(),
-        data["ro_no"],
+        furnace_name,
         data["instruction_no"],
         data["syori_name"],
         data["reikyakku_name"],

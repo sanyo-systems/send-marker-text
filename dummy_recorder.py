@@ -9,14 +9,12 @@ server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind((HOST, PORT))
 server.listen()
 
-print("Dummy Recorder started")
 
 try:
 
     while True:
 
         conn, addr = server.accept()
-        print("connection from", addr)
 
         try:
 
@@ -27,7 +25,6 @@ try:
                 if not data:
                     break
 
-                print("recv:", data)
 
                 # TransactionIDコピー
                 transaction = data[0:2]
@@ -47,7 +44,7 @@ try:
 
         except Exception as e:
 
-            print("connection error:", e)
+            pass
 
         finally:
 
@@ -55,7 +52,7 @@ try:
 
 except KeyboardInterrupt:
 
-    print("Dummy Recorder stopped")
+    pass
 
 finally:
 

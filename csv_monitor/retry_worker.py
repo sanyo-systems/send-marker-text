@@ -26,12 +26,10 @@ def retry_loop():
                 continue
 
             if key in sent_history:
-                logging.info(f"RETRY_SKIP_SENT {key}")
                 remove_failed(key)
                 continue
 
             if key in queued_keys:
-                logging.info(f"RETRY_SKIP_QUEUED {key}")
                 remove_failed(key)
                 continue
 

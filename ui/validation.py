@@ -1,6 +1,3 @@
-inter = ["PG-1", "PG-2", "PG-3", "PG-4","PG-5", "SQ-1","SQ-2", "SQ-3", "油槽"]
-
-
 # ==========================================================
 # 温度入力データ検証
 #
@@ -19,7 +16,7 @@ inter = ["PG-1", "PG-2", "PG-3", "PG-4","PG-5", "SQ-1","SQ-2", "SQ-3", "油槽"]
 # 失敗時
 #   False, エラーメッセージ
 # ==========================================================
-def send_temp(all_list, person, now, hour, hour_type):
+def send_temp(all_list, person, now, hour, hour_type, inter):
     if not str(person).strip():
         return False, "確認者を入力してください"
     temp_dict = {}
@@ -28,7 +25,7 @@ def send_temp(all_list, person, now, hour, hour_type):
     # enumerate()で()内のリストの要素番号と一緒に取得可能
     # for temp_index, h in enumerate(pair):
     # all_list = [(ro_no, act_temp), ・・・]
-    for ro_no, act_temp in all_list:
+    for ro_no, act_temp, ip in all_list:
         temp_dic = {}
         # 入力内容が存在しない時はcontinueで飛ばす。
         if not str(act_temp).strip():
@@ -47,7 +44,9 @@ def send_temp(all_list, person, now, hour, hour_type):
         # (炉No, 設定温度, 測定温度)辞書として生成
         temp_dic = {
             "ro_no": ro_no,
-            "act_temp": act_val
+            "act_temp": act_val,
+            "furnace_name": inter[ro_no],
+            "ip": ip
         }
         furnaces.append(temp_dic)
     if not furnaces:

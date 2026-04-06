@@ -88,7 +88,6 @@ def enqueue(data, key, retry_count=0):
         raise RuntimeError("QUEUE_OVERFLOW drop data")
 
     queue_item = (data, key, retry_count)
-    logging.info(f"ENQUEUE_START key={key} retry={retry_count}")
     # ★ 先に永続化（失敗したら何も起きない）
     try:
         with queue_lock:
@@ -109,10 +108,6 @@ def enqueue(data, key, retry_count=0):
         logging.error(f"ENQUEUE_ROLLBACK key={key} retry={retry_count}")
         _remove_from_persistent_queue(key)
         raise
-    logging.info(
-        f"ENQUEUE_DONE key={key} retry={retry_count} qsize={send_queue.qsize()}"
-    )
-
 
 def start_worker(process_func, sent_history=None):
     sent_history = sent_history if sent_history is not None else load_history()
@@ -132,7 +127,6 @@ def start_worker(process_func, sent_history=None):
                 continue
 
             try:
-                logging.info(f"WORKER_PICKED key={key} retry={retry_count}")
                 success = process_func(data)
 
                 # ★ ここ追加
@@ -142,9 +136,6 @@ def start_worker(process_func, sent_history=None):
                     _remove_from_persistent_queue(key)
                     continue
 
-                logging.info(
-                    f"WORKER_RESULT key={key} retry={retry_count} success={success}"
-                )
                 if success is True:
                     try:
                         _persist_success(key, sent_history)
@@ -155,9 +146,6 @@ def start_worker(process_func, sent_history=None):
                 elif success is False:
                     _persist_failure(data, key, retry_count)
                 else:
-                    logging.info(
-                        f"WORKER_SKIP_RETRY key={key} retry={retry_count} result={success}"
-                    )
                     _drop_without_retry(key)
             except Exception as e:
                 logging.error(f"SEND_WORKER_ERROR key={key} retry={retry_count} {e}")
