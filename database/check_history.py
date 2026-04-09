@@ -1,5 +1,6 @@
-import pyodbc
 import logging
+import pyodbc
+
 
 # ==========================================================
 # 最新チェック履歴取得
@@ -26,20 +27,25 @@ def load_latest_history(accdb_path, furnace_name):
         f"DBQ={accdb_path};"
     )
 
-    with pyodbc.connect(conn_str) as conn:
+    try:
+        with pyodbc.connect(conn_str) as conn:
+            cur = conn.cursor()
+            sql = """
+            SELECT TOP 1 記録日時, IPadress
+            FROM チェック履歴
+            WHERE 炉名 = ? and [type] = ?
+            ORDER BY 記録日時 DESC
+            """
+            # 指定した炉の最新履歴を取得
+            cur.execute(sql, (furnace_name, "1H"))
+            row = cur.fetchone()
+            if not row:
+                logging.warning(f"履歴無し 炉={furnace_name}")
+                return None
 
-        cur = conn.cursor()
-        sql = """
-        SELECT TOP 1 記録日時, IPadress
-        FROM チェック履歴
-        WHERE 炉名 = ? and [type] = ?
-        ORDER BY 記録日時 DESC
-        """
-        # 指定した炉の最新履歴を取得
-        cur.execute(sql, (furnace_name, "1H"))
-        row = cur.fetchone()
-        if not row:
-            logging.warning(f"履歴無し 炉={furnace_name}")
-            return None
-
-        return row
+            return row
+    except pyodbc.Error as e:
+        logging.error(
+            f"CHECK_HISTORY_DB_CONNECT_ERROR furnace={furnace_name} path={accdb_path} error={e}"
+        )
+        return None
