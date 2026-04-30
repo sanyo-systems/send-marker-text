@@ -12,14 +12,15 @@ os.makedirs(BASE_DIR, exist_ok=True)
 
 PATHS = [
     os.path.join(BASE_DIR, "PG-1.json"),
-    os.path.join(BASE_DIR, "PG-2.json"),
     os.path.join(BASE_DIR, "PG-3.json"),
+    os.path.join(BASE_DIR, "SQ-1.json"),
+    os.path.join(BASE_DIR, "油槽1.json"),
+    os.path.join(BASE_DIR, "PG-2.json"),
+    os.path.join(BASE_DIR, "SQ-3.json"),
+    os.path.join(BASE_DIR, "油槽2.json"),
     os.path.join(BASE_DIR, "PG-4.json"),
     os.path.join(BASE_DIR, "PG-5.json"),
-    os.path.join(BASE_DIR, "SQ-1.json"),
-    os.path.join(BASE_DIR, "SQ-2.json"),
-    os.path.join(BASE_DIR, "SQ-3.json"),
-    os.path.join(BASE_DIR, "油槽.json")
+    os.path.join(BASE_DIR, "SQ-2.json")
 ]
 
 # ==========================================================

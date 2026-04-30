@@ -2,6 +2,7 @@ import tkinter as tk
 import os
 import threading
 import logging
+import re
 from collections import defaultdict
 from tkinter import ttk, messagebox
 from datetime import datetime, timedelta
@@ -67,7 +68,7 @@ def start_csv_thread(handler):
 def build_ui(rec_type="PIT"):
     # ===== 炉リスト =====
     if rec_type == "PIT":
-        inter = ["PG-1", "PG-2", "PG-3", "PG-4","PG-5", "SQ-1","SQ-2", "SQ-3", "油槽"]
+        inter = ["PG-1", "PG-3", "SQ-1", "油槽1","PG-2", "SQ-3","油槽2", "PG-4", "PG-5", "SQ-2"]
     else:
         inter = ["NG-1", "TG-2"]
 
@@ -91,7 +92,21 @@ def build_ui(rec_type="PIT"):
     }
 
     def get_recorder_config(furnace_name):
-        return config_map.get(furnace_name)
+        if not furnace_name:
+            return None
+        key = str(furnace_name).strip()
+        rec = config_map.get(key)
+        if rec:
+            return rec
+
+        # e.g. "油槽1" -> try "油槽" when Setting.ini uses "RE油槽.csv"
+        key2 = re.sub(r"[0-9０-９]+$", "", key).strip()
+        if key2 and key2 != key:
+            rec = config_map.get(key2)
+            if rec:
+                return rec
+
+        return None
 
     # 🔥 炉設定（将来拡張用）
     furnace_config = [
@@ -180,9 +195,7 @@ def build_ui(rec_type="PIT"):
     # =====================================================
     # 炉入力欄生成
     #
-    # PG炉 : 1〜5
-    # SQ炉 : 1〜3
-    # 油槽 : 1
+    # ["PG-1", "PG-3", "SQ-1", "油槽1","PG-2", "SQ-3","油槽2", "PG-4", "PG-5", "SQ-2"]
     #
     # 各炉の
     # ・稼働チェック
@@ -210,12 +223,12 @@ def build_ui(rec_type="PIT"):
         entry_act_list.append(e_act)
     
     # 入力者　入力欄作成
-    ttk.Label(input_frame, text="1Hチェック確認者").grid(row=10, column=0)
+    ttk.Label(input_frame, text="1Hチェック確認者").grid(row=11, column=0)
     one_person = ttk.Entry(input_frame, width=8)
-    one_person.grid(row=10, column=1)
-    ttk.Label(input_frame, text="4Hチェック確認者").grid(row=10, column=2)
+    one_person.grid(row=11, column=1)
+    ttk.Label(input_frame, text="4Hチェック確認者").grid(row=11, column=2)
     four_person = ttk.Entry(input_frame, width=8)
-    four_person.grid(row=10, column=3)
+    four_person.grid(row=11, column=3)
 
 
     # =====================================================
@@ -622,7 +635,7 @@ def build_ui(rec_type="PIT"):
 
     # ボタンOK関数起動
     btn_ok = ttk.Button(input_frame, text="登録", command=on_ok)
-    btn_ok.grid(row=11, column=1)
+    btn_ok.grid(row=12, column=1)
 
     # 送信でコメント送信
     btn_ok = ttk.Button(coment_frame, text="登録", command=on_comment)
