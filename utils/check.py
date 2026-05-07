@@ -32,7 +32,7 @@ def check_time():
 
         diff = min(diff, 86400 - diff)
         # 現時刻と仮定時間の差の秒数を絶対値で求め、10分以内の場合はstr(i)で返す。
-        if abs((now - base_time).total_seconds()) <= 1800:
+        if abs((now - base_time).total_seconds()) <= 1200:
             return str(i)
 
     return None
