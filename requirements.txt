@@ -1,0 +1,5 @@
+watchdog
+psutil==6.1.1
+pyodbc
+requests
+pyinstaller

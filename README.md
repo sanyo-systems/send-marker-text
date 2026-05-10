@@ -116,11 +116,18 @@ Access DB の場所
 
 ## 7. 実行方法
 Pythonで実行する場合
+事前に依存関係をインストールします。
+`pip install -r requirements.txt`
+
 python main.py
 exeで実行する場合
 作成した main.exe を起動します
 (pyinstaller main.py --onedir --noconsole --clean
  でmain.exeを作成)
+
+補足
+- Access連携には Windows の `Microsoft Access Driver (*.mdb, *.accdb)` が別途必要です
+- `pyodbc` を入れても ODBC ドライバ自体が無い環境では Access 書き込みはできません
 
 ## 8. 導入時の考え方
 導入時は、以下のような形を想定しています。

@@ -3,6 +3,22 @@ import os
 import sys
 
 
+def normalize_config_path(raw_path):
+    path = str(raw_path).strip().strip('"').strip("'")
+    if not path:
+        return path
+
+    # Recover from malformed UNC like \\server\file.accdb by trying the common Sprint share.
+    if path.startswith("\\\\"):
+        parts = path[2:].split("\\")
+        if len(parts) == 2 and parts[1].lower().endswith((".accdb", ".mdb")):
+            candidate = f"\\\\{parts[0]}\\Sprint\\{parts[1]}"
+            if os.path.exists(candidate):
+                return candidate
+
+    return path
+
+
 def get_base_dir():
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
@@ -20,8 +36,8 @@ config.read(CONFIG_PATH, encoding="shift_jis")
 
 CSV_FOLDER = config.get("SECTION_1", "CSV_FOLDER1")
 
-ACCESS_FILE = config.get("SECTION_1", "ACCESS_FILE")
-ACCESS_FILE_2 = config.get("SECTION_1", "ACCESS_FILE_2")
+ACCESS_FILE = normalize_config_path(config.get("SECTION_1", "ACCESS_FILE"))
+ACCESS_FILE_2 = normalize_config_path(config.get("SECTION_1", "ACCESS_FILE_2"))
 
 
 RECORDER_CONFIG = []
