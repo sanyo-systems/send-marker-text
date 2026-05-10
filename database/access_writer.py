@@ -2,6 +2,7 @@ import logging
 import os
 import pyodbc
 from datetime import datetime
+from communication.config_loader import normalize_config_path
 
 # ==========================================================
 # 社員番号から作業者名を取得
@@ -16,6 +17,10 @@ from datetime import datetime
 # 入力値そのものを返して処理を継続する。
 # ==========================================================
 def get_employee_name(emp_db_path, emp_no):
+    emp_db_path = normalize_config_path(emp_db_path)
+    if not os.path.exists(emp_db_path):
+        raise RuntimeError(f"社員番号DBが見つかりません: {emp_db_path}")
+
     conn_str = (
         r"DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
         f"DBQ={emp_db_path};"
@@ -56,11 +61,21 @@ def get_employee_name(emp_db_path, emp_no):
 # 1回の入力操作を複数レコードとして記録する。
 # ==========================================================
 def insert_check_history_batch(check_db_path, emp_db_path, temp_dict):
+    check_db_path = normalize_config_path(check_db_path)
+    emp_db_path = normalize_config_path(emp_db_path)
+    if not os.path.exists(check_db_path):
+        raise RuntimeError(f"チェック履歴DBが見つかりません: {check_db_path}")
+
 
     emp_no = temp_dict["person"]
     hour = temp_dict["hour"]
     check_type = temp_dict["type"]
     now_dt = temp_dict["time"]
+    if isinstance(now_dt, str):
+        try:
+            now_dt = datetime.fromisoformat(now_dt)
+        except ValueError:
+            now_dt = datetime.strptime(now_dt, "%Y-%m-%d %H:%M:%S")
     # 社員番号から社員名を取得
     employee_name = get_employee_name(emp_db_path, emp_no)
 
@@ -69,38 +84,46 @@ def insert_check_history_batch(check_db_path, emp_db_path, temp_dict):
         f"DBQ={check_db_path};"
     )
 
-    with pyodbc.connect(conn_str) as conn:
-        with conn.cursor() as cur:
+    conn = None
+    cur = None
+    try:
+        conn = pyodbc.connect(conn_str)
+        cur = conn.cursor()
 
-            sql = """
-            INSERT INTO チェック履歴
-            (記録日時, 炉名, テキストボックス入力内容, 作業者名, hour, [type], IPadress)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """
-            # 入力内容を順番に入れていく
-            for furnace in temp_dict["furnaces"]:
+        sql = """
+        INSERT INTO チェック履歴
+        (記録日時, 炉名, テキストボックス入力内容, 作業者名, hour, [type], IPadress)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        for furnace in temp_dict["furnaces"]:
+            act_temp = furnace["act_temp"]
+            furnace_name = furnace["furnace_name"]
+            textbox = f"ACT {act_temp}"
+            ip = furnace["ip"]
 
-                ro_no = furnace["ro_no"]
-                act_temp = furnace["act_temp"]
+            cur.execute(sql, (
+                now_dt,
+                furnace_name,
+                textbox,
+                employee_name,
+                int(hour),
+                check_type,
+                ip
+            ))
 
-                # 🔥 修正（これが本質）
-                furnace_name = furnace["furnace_name"]
-                textbox = f"ACT {act_temp}"
-
-                # ⚠ IPはとりあえずro_noでOK（後で改善可）
-                ip = furnace["ip"]
-
-                cur.execute(sql, (
-                    now_dt,
-                    furnace_name,
-                    textbox,
-                    employee_name,
-                    hour,
-                    check_type,
-                    ip
-                ))
-        # 全件登録、コミット
         conn.commit()
+    except pyodbc.Error as e:
+        logging.error(
+            "CHECK_HISTORY_BATCH_DB_ERROR "
+            f"db={check_db_path} emp_db={emp_db_path} hour={hour} "
+            f"type={check_type} person={emp_no} error={e}"
+        )
+        raise RuntimeError(f"Access書き込みに失敗しました: {e}") from e
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
 
 
 # ==========================================================
@@ -120,6 +143,11 @@ def insert_check_history_batch(check_db_path, emp_db_path, temp_dict):
 # 送信結果の追跡やトラブル調査で使用する。
 # ==========================================================
 def insert_csv_history(db_path, data, ip):
+    db_path = normalize_config_path(db_path)
+    if not os.path.exists(db_path):
+        logging.error(f"CSV_HISTORY_SAVE_ERROR db not found: {db_path}")
+        return
+
     path = data.get("path")
     if not path:
         logging.error("CSV_HISTORY_SAVE_ERROR path missing")

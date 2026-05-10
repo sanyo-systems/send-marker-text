@@ -68,9 +68,11 @@ def start_csv_thread(handler):
 def build_ui(rec_type="PIT"):
     # ===== 炉リスト =====
     if rec_type == "PIT":
-        inter = ["PG-1", "PG-3", "SQ-1", "油槽1","PG-2", "SQ-3","油槽2", "PG-4", "PG-5", "SQ-2"]
+        inter = ["PG-1", "SQ-1", "PG-2", "SQ-3", "油槽", "PG-3", "PG-4", "SQ-2", "PG-5"]
+        comment_inter = ["PG-1", "PG-2", "PG-3", "PG-4", "PG-5", "SQ-1", "SQ-2", "SQ-3", "油槽"]
     else:
         inter = ["NG-1", "TG-2"]
+        comment_inter = inter[:]
 
     def normalize_furnace_name(csv_file):
         if not csv_file:
@@ -91,6 +93,12 @@ def build_ui(rec_type="PIT"):
         if normalize_furnace_name(rec["file"])
     }
 
+    normalized_config_map = {}
+    for key, rec in config_map.items():
+        normalized_key = re.sub(r"[0-9０-９]+$", "", key).strip()
+        if normalized_key and normalized_key not in normalized_config_map:
+            normalized_config_map[normalized_key] = rec
+
     def get_recorder_config(furnace_name):
         if not furnace_name:
             return None
@@ -103,6 +111,15 @@ def build_ui(rec_type="PIT"):
         key2 = re.sub(r"[0-9０-９]+$", "", key).strip()
         if key2 and key2 != key:
             rec = config_map.get(key2)
+            if rec:
+                return rec
+
+        rec = normalized_config_map.get(key)
+        if rec:
+            return rec
+
+        if key2:
+            rec = normalized_config_map.get(key2)
             if rec:
                 return rec
 
@@ -119,6 +136,8 @@ def build_ui(rec_type="PIT"):
     root = tk.Tk()
     version = load_version()
     root.title(f"記録計通信ソフト ver {version}")
+    root.geometry("1600x900")
+    root.minsize(1400, 800)
     root.grid_rowconfigure(0, weight=1)
     root.grid_columnconfigure(0, weight=1)
 
@@ -140,6 +159,10 @@ def build_ui(rec_type="PIT"):
 
     def on_mousewheel(event):
         canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def bind_enter_to_button(button):
+        button.bind("<Return>", lambda event: button.invoke())
+        button.bind("<KP_Enter>", lambda event: button.invoke())
 
     content_frame.bind("<Configure>", on_content_configure)
     canvas.bind("<Configure>", on_canvas_configure)
@@ -174,8 +197,10 @@ def build_ui(rec_type="PIT"):
     coment_frame = ttk.LabelFrame(left_frame, text="任意コメント")
     coment_frame.grid(row=2, column=0, padx=10, pady=10)
     # 送信内容予約枠
-    appoint_frame = ttk.LabelFrame(left_frame, text="送信内容予約")
-    appoint_frame.grid(row=3, column=0, padx=10, pady=10)
+    appoint_frame = None
+    if rec_type != "PIT":
+        appoint_frame = ttk.LabelFrame(left_frame, text="送信内容予約")
+        appoint_frame.grid(row=3, column=0, padx=10, pady=10)
     # 1Hチェック履歴枠
     one_check_frame = ttk.LabelFrame(right_frame, text="1Hチェック履歴")
     one_check_frame.grid(row=0, column=0, padx=10, pady=10)
@@ -187,11 +212,13 @@ def build_ui(rec_type="PIT"):
     four_botton_frame.grid(row=2, column=0, padx=10, pady=10)
     # 記録計前回送信済み内容
     before_frame = ttk.LabelFrame(left_frame, text="記録計前回送信済み内容")
-    before_frame.grid(row=3, column=0, padx=10, pady=10)
+    before_frame_row = 4 if appoint_frame is not None else 3
+    before_frame.grid(row=before_frame_row, column=0, padx=10, pady=10)
 
     run_vars = []  # 炉の稼働フラグ（True/False）
     entry_ro_list = []
     entry_act_list = []
+    furnace_checkbuttons = []
     # =====================================================
     # 炉入力欄生成
     #
@@ -205,30 +232,52 @@ def build_ui(rec_type="PIT"):
     ttk.Label(input_frame, text="稼働").grid(row=0, column=0)
     ttk.Label(input_frame, text=f"炉名").grid(row=0, column=1)
     ttk.Label(input_frame, text=f"測定温度").grid(row=0, column=2)
+
+    def update_entry_state(var, entry):
+        is_running = bool(var.get())
+        if is_running:
+            entry.state(["!disabled"])
+            entry.configure(takefocus=True)
+        else:
+            entry.delete(0, tk.END)
+            entry.state(["disabled"])
+            entry.configure(takefocus=False)
+
     # 炉ごとの設定温度と測定温度の欄作成
     for i in range(len(inter)):
-        var = tk.BooleanVar(value=True)  # とりあえず最初は稼働ONにする（必要ならFalse）
+        var = tk.IntVar(value=0)
         run_vars.append(var)
         # 炉の番号
         ro = i
         # ===== 全炉共通レイアウト（縦並び）=====
         ttk.Label(input_frame, text=inter[i], font=("Arial", 10, "bold")).grid(row=i+1, column=1)
 
-        chk = ttk.Checkbutton(input_frame, variable=var)
-        chk.grid(row=i + 1, column=0)
-        e_act = ttk.Entry(input_frame, width=8)
+        e_act = ttk.Entry(input_frame, width=8, takefocus=False)
         e_act.grid(row=i + 1, column=2)
+
+        chk = ttk.Checkbutton(
+            input_frame,
+            variable=var,
+            onvalue=1,
+            offvalue=0,
+            takefocus=False,
+            command=lambda var=var, entry=e_act: update_entry_state(var, entry)
+        )
+        chk.grid(row=i + 1, column=0)
+        furnace_checkbuttons.append(chk)
+        update_entry_state(var, e_act)
         # リストにactで各々まとめる
         entry_ro_list.append(ro)
         entry_act_list.append(e_act)
     
     # 入力者　入力欄作成
-    ttk.Label(input_frame, text="1Hチェック確認者").grid(row=11, column=0)
+    action_row = len(inter) + 1
+    ttk.Label(input_frame, text="1Hチェック確認者").grid(row=action_row, column=0, padx=(0, 4))
     one_person = ttk.Entry(input_frame, width=8)
-    one_person.grid(row=11, column=1)
-    ttk.Label(input_frame, text="4Hチェック確認者").grid(row=11, column=2)
+    one_person.grid(row=action_row, column=1, padx=(0, 12))
+    ttk.Label(input_frame, text="4Hチェック確認者").grid(row=action_row, column=2, padx=(0, 4))
     four_person = ttk.Entry(input_frame, width=8)
-    four_person.grid(row=11, column=3)
+    four_person.grid(row=action_row, column=3, padx=(0, 12))
 
 
     # =====================================================
@@ -417,31 +466,33 @@ def build_ui(rec_type="PIT"):
 
     # 送信予約にしたい！！！
     # 現在は機能していないため、中止
-    apo_list = []
-    #　予約内容と取り消しボタン
-    for i, furnace in enumerate(inter):
-        ttk.Label(appoint_frame, text=furnace).grid(row=i, column=0)
-        ttk.Label(appoint_frame, text="予約内容").grid(row=i, column=1)
-        lbl_apo = ttk.Label(appoint_frame, text="-")
-        lbl_apo.grid(row=i, column=2)
-        apo_list.append(lbl_apo)
+    if appoint_frame is not None:
+        apo_list = []
+        #　予約内容と取り消しボタン
+        for i, furnace in enumerate(inter):
+            ttk.Label(appoint_frame, text=furnace).grid(row=i, column=0)
+            ttk.Label(appoint_frame, text="予約内容").grid(row=i, column=1)
+            lbl_apo = ttk.Label(appoint_frame, text="-")
+            lbl_apo.grid(row=i, column=2)
+            apo_list.append(lbl_apo)
 
-    # 取り消しボタン
-    for i in range(len(inter)):
-        btn_ok = ttk.Button(appoint_frame, text="取消", command="")
-        btn_ok.grid(row=i, column=3)
+        # 取り消しボタン
+        for i in range(len(inter)):
+            btn_ok = ttk.Button(appoint_frame, text="取消", command="")
+            btn_ok.grid(row=i, column=3)
 
 
 
     # 任意コメント
     # 入力リストをプルダウンにする
-    inter_combo = ttk.Combobox(coment_frame, values=inter, state="readonly")
-    inter_combo.grid(row=0, column=1)
+    ttk.Label(coment_frame, text="炉").grid(row=0, column=0, padx=(0, 4))
+    inter_combo = ttk.Combobox(coment_frame, values=comment_inter, state="readonly", width=10)
+    inter_combo.grid(row=0, column=1, padx=(0, 12))
     inter_combo.current(0) 
     # コメントの入力
-    ttk.Label(coment_frame, text="コメント").grid(row=1, column=0)
-    comment_entry = ttk.Entry(coment_frame)
-    comment_entry.grid(row=1, column=1)  
+    ttk.Label(coment_frame, text="コメント").grid(row=0, column=2, padx=(0, 4))
+    comment_entry = ttk.Entry(coment_frame, width=40)
+    comment_entry.grid(row=0, column=3, padx=(0, 12))  
 
     # 任意コメントの処理
     def on_comment():
@@ -484,7 +535,7 @@ def build_ui(rec_type="PIT"):
             messagebox.showerror("通信エラー", str(e))
             return
         comment(now_str, text, select_no)
-        messagebox.showinfo("成功", "送信準備完了")
+        messagebox.showinfo("成功", "コメントを送信しました")
         # コメント内容の削除と選択炉をPG-1にする
         comment_entry.delete(0, tk.END)
         inter_combo.current(0)
@@ -530,11 +581,17 @@ def build_ui(rec_type="PIT"):
 
     def refresh_check_ui():
         before_data()
-        messagebox.showinfo("成功", "送信準備完了")
+        record(0)
+        four_record(0)
+        messagebox.showinfo("成功", "チェック履歴を登録しました")
 
     def clear_check_inputs():
         for e_act in entry_act_list:
             e_act.delete(0, tk.END)
+            e_act.state(["disabled"])
+            e_act.configure(takefocus=False)
+        for var in run_vars:
+            var.set(0)
         one_person.delete(0, tk.END)
         four_person.delete(0, tk.END)
 
@@ -547,7 +604,6 @@ def build_ui(rec_type="PIT"):
             messagebox.showerror("エラー", "点検時間外です（毎時±20分のみ入力可能）")
             return
 
-        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
         all_list = []
         # entry_actから取得 zip(list1, list2)でfor i, h in zip()でその値を取得可能
         for ro, e_act in zip(entry_ro_list, entry_act_list):
@@ -577,9 +633,9 @@ def build_ui(rec_type="PIT"):
         # validationの関数
         # 変数A and not 変数BでAは入力されているがBはされていないとなる
         if one_val and not four_val:
-            result, temp_dict = send_temp(all_list, one_val, now_str, hour, "1H", inter)
+            result, temp_dict = send_temp(all_list, one_val, now, hour, "1H", inter)
         elif not one_val and four_val:
-            result, temp_dict = send_temp(all_list, four_val, now_str, hour, "4H", inter)
+            result, temp_dict = send_temp(all_list, four_val, now, hour, "4H", inter)
         else:
             messagebox.showerror("エラー", "1Hか4Hどちらか一方のみ入力してください")
             return
@@ -588,7 +644,13 @@ def build_ui(rec_type="PIT"):
             messagebox.showerror("エラー", temp_dict)
             return
 
-        save_check_data(temp_dict)
+        try:
+            save_check_data(temp_dict)
+        except Exception as e:
+            logging.exception("CHECK_HISTORY_SAVE_ERROR")
+            messagebox.showerror("Access書き込みエラー", str(e))
+            return
+
         refresh_check_ui()
         clear_check_inputs()
         return root
@@ -632,14 +694,19 @@ def build_ui(rec_type="PIT"):
     # 取れなかった場合の再取得ボタン
     btn_ok = ttk.Button(before_frame, text="再読み込み", command=before_data)
     btn_ok.grid(row=19, column=1)
+    bind_enter_to_button(btn_ok)
 
     # ボタンOK関数起動
     btn_ok = ttk.Button(input_frame, text="登録", command=on_ok)
-    btn_ok.grid(row=12, column=1)
+    btn_ok.grid(row=action_row, column=4, padx=(8, 0))
+    bind_enter_to_button(btn_ok)
 
     # 送信でコメント送信
     btn_ok = ttk.Button(coment_frame, text="登録", command=on_comment)
-    btn_ok.grid(row=2, column=1)
+    btn_ok.grid(row=0, column=4)
+    bind_enter_to_button(btn_ok)
+
+    recoreco(0)
 
     popup_thread = threading.Thread(
         target=popup_loop,
