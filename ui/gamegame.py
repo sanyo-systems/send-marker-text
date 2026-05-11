@@ -68,7 +68,7 @@ def start_csv_thread(handler):
 def build_ui(rec_type="PIT"):
     # ===== 炉リスト =====
     if rec_type == "PIT":
-        inter = ["PG-1", "SQ-1", "PG-2", "SQ-3", "油槽", "PG-3", "PG-4", "SQ-2", "PG-5"]
+        inter = ["PG-1", "SQ-1", "PG-5", "PG-2", "油槽", "SQ-2", "PG-4", "PG-3", "SQ-3"]
         comment_inter = ["PG-1", "PG-2", "PG-3", "PG-4", "PG-5", "SQ-1", "SQ-2", "SQ-3", "油槽"]
     else:
         inter = ["NG-1", "TG-2"]
@@ -331,9 +331,9 @@ def build_ui(rec_type="PIT"):
     ok_no_list_list_1h = []
     day_day_1h = ttk.Label(one_check_frame, text="-")
     day_day_1h.grid(row=0, column=0)
-    for ro in range(len(inter)):
+    for ro in range(len(comment_inter)):
         ok_no_list = []
-        ttk.Label(one_check_frame, text=inter[ro]).grid(row=0, column=2 + ro)
+        ttk.Label(one_check_frame, text=comment_inter[ro]).grid(row=0, column=2 + ro)
         for i in range(24):
             ttk.Label(one_check_frame, text=f"{i}").grid(row=24 - i, column=1)
             ok_no = ttk.Label(one_check_frame, text="-")
@@ -392,10 +392,10 @@ def build_ui(rec_type="PIT"):
     hour_list_list = []
     day_day_4h = ttk.Label(four__check_frame, text="-")
     day_day_4h.grid(row=0, column=0)
-    for ro in range(len(inter)):
+    for ro in range(len(comment_inter)):
         ok_no_list = []
         hour_list = []
-        ttk.Label(four__check_frame, text=inter[ro]).grid(row=0, column=2 + ro)
+        ttk.Label(four__check_frame, text=comment_inter[ro]).grid(row=0, column=2 + ro)
         for i in range(8):
             hour = ttk.Label(four__check_frame, text="-")
             hour.grid(row=8 - i, column=1)
@@ -442,7 +442,7 @@ def build_ui(rec_type="PIT"):
 
         # 配置
         for furnace_name, hours in grouped.items():
-            if furnace_name not in inter:
+            if furnace_name not in comment_inter:
                 continue
             col_index = inter.index(furnace_name)
 
