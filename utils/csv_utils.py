@@ -5,19 +5,10 @@ import logging
 from datetime import datetime
 
 def move_csv_done(path):
-    done_dir = os.path.join(os.path.dirname(path), "DONE")
-    os.makedirs(done_dir, exist_ok=True)
-
-    base_name = os.path.basename(path)
-    name, ext = os.path.splitext(base_name)
-    now_str = datetime.now().strftime("%Y%m%d%H%M%S")
-    new_filename = f"{name}_{now_str}{ext}"
-    new_path = os.path.join(done_dir, new_filename)
-
     for i in range(10):
         try:
-            shutil.copy2(path, new_path)
-            logging.info(f"CSV_MOVE_DONE {path} -> {new_path}")
+            os.remove(path)
+            logging.info(f"CSV_DELETE_DONE {path}")
             return True
         except PermissionError as e:
             logging.warning(f"CSV_MOVE_RETRY_DONE {i + 1}/10 {path} {e}")
@@ -25,7 +16,7 @@ def move_csv_done(path):
         except FileNotFoundError:
             logging.warning(f"CSV_MOVE_SKIP_NOT_FOUND {path}")
             return True
-    logging.error(f"CSV_MOVE_FAILED_DONE {path}")
+    logging.error(f"CSV_DELETE_FAILED_DONE {path}")
     return False
 
 
