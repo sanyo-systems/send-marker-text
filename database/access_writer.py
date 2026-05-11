@@ -2,7 +2,7 @@ import logging
 import os
 import pyodbc
 from datetime import datetime
-from communication.config_loader import normalize_config_path
+from communication.config_loader import normalize_config_path, RECORDER_CONFIG
 
 # ==========================================================
 # 社員番号から作業者名を取得
@@ -160,14 +160,29 @@ def insert_csv_history(db_path, data, ip):
         logging.error(f"CSV_HISTORY_SAVE_ERROR invalid file format: {path}")
         return
 
-    furnace_name = name
-    if furnace_name.upper().startswith("RE"):
-        furnace_name = furnace_name[2:]
-
-    furnace_name = furnace_name.upper().strip()
-    if not furnace_name:
-        logging.error(f"CSV_HISTORY_SAVE_ERROR furnace name parse failed: {path}")
+    filename_upper = filename.upper()
+    # Access側(CSV履歴)の「炉番号」はINTEGERなので、設定(Setting.ini)のRECORDER_CONFIG.no を使う
+    furnace_no = None
+    for rec in RECORDER_CONFIG:
+        if not rec.get("file"):
+            continue
+        if str(rec["file"]).upper().strip() == filename_upper:
+            furnace_no = int(rec["no"])
+            break
+    if furnace_no is None:
+        logging.error(f"CSV_HISTORY_SAVE_ERROR furnace no not found: {path}")
         return
+
+    # Access側(CSV履歴)の「指示番号」はINTEGERなので、送信文字列の先頭を数値として保存する
+    raw_instruction = str(data.get("instruction_no", "")).strip()
+    instruction_head = raw_instruction.split("/", 1)[0].strip()
+    if not instruction_head.isdigit():
+        logging.error(f"CSV_HISTORY_SAVE_ERROR invalid instruction_no: {path} ins={raw_instruction}")
+        return
+    instruction_no = int(instruction_head)
+
+    syori_name = str(data.get("syori_name", "")).strip()
+    reikyakku_name = str(data.get("reikyakku_name", "")).strip()
 
     conn = pyodbc.connect(
         r"DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
@@ -178,16 +193,16 @@ def insert_csv_history(db_path, data, ip):
 
     sql = """
     INSERT INTO CSV履歴
-    (記録日時, 炉番号, 指示番号, 処理名, 冷却名, IP)
+    (記録日時, 炉番号, 指示番号, 処理名, 冷却名, ip)
     VALUES (?, ?, ?, ?, ?, ?)
     """
 
     cur.execute(sql, (
         datetime.now(),
-        furnace_name,
-        data["instruction_no"],
-        data["syori_name"],
-        data["reikyakku_name"],
+        furnace_no,
+        instruction_no,
+        syori_name,
+        reikyakku_name,
         ip
 
     ))
