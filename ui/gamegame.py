@@ -68,7 +68,7 @@ def start_csv_thread(handler):
 def build_ui(rec_type="PIT"):
     # ===== 炉リスト =====
     if rec_type == "PIT":
-        inter = ["PG-1", "SQ-1", "PG-2", "SQ-3", "油槽", "PG-3", "PG-4", "SQ-2", "PG-5"]
+        inter = ["PG-1", "SQ-1", "PG-5", "PG-2", "油槽", "SQ-2", "PG-4", "PG-3", "SQ-3"]
         comment_inter = ["PG-1", "PG-2", "PG-3", "PG-4", "PG-5", "SQ-1", "SQ-2", "SQ-3", "油槽"]
     else:
         inter = ["NG-1", "TG-2"]
