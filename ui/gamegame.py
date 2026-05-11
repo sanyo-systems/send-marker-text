@@ -361,7 +361,7 @@ def build_ui(rec_type="PIT"):
         day_day_1h.config(text=da_a)
 
         # まず全クリア
-        for ro in range(len(inter)):
+        for ro in range(len(comment_inter)):
             for i in range(24):
                 ok_no_list_list_1h[ro][i].config(text="-")
 
@@ -372,9 +372,9 @@ def build_ui(rec_type="PIT"):
         )
 
         for furnace_name, hour in rows:
-            if furnace_name not in inter:
+            if furnace_name not in comment_inter:
                 continue
-            col_index = inter.index(furnace_name)
+            col_index = comment_inter.index(furnace_name)
         # hour時のリストをOKにする
             ok_no_list_list_1h[col_index][int(hour)].config(text="OK")
 
@@ -389,22 +389,23 @@ def build_ui(rec_type="PIT"):
     # =====================================================
     # 炉名 送信日時 設定温度 測定温度 確認者を表示
     ok_no_list_list = []
-    hour_list_list = []
+    hour_labels_4h = []
     day_day_4h = ttk.Label(four__check_frame, text="-")
     day_day_4h.grid(row=0, column=0)
+    ttk.Label(four__check_frame, text="時刻").grid(row=0, column=1)
+    for i in range(8):
+        hour = ttk.Label(four__check_frame, text="-")
+        hour.grid(row=8 - i, column=1)
+        hour_labels_4h.append(hour)
+
     for ro in range(len(comment_inter)):
         ok_no_list = []
-        hour_list = []
         ttk.Label(four__check_frame, text=comment_inter[ro]).grid(row=0, column=2 + ro)
         for i in range(8):
-            hour = ttk.Label(four__check_frame, text="-")
-            hour.grid(row=8 - i, column=1)
             ok_no = ttk.Label(four__check_frame, text="-")
             ok_no.grid(row=8 - i, column=2 + ro)
             ok_no_list.append(ok_no)
-            hour_list.append(hour)
         ok_no_list_list.append(ok_no_list)
-        hour_list_list.append(hour_list)
 
     # =====================================================
     # 4H履歴読み込み
@@ -424,10 +425,11 @@ def build_ui(rec_type="PIT"):
         day_day_4h.config(text=da_a)
 
         # まず全クリア
-        for ro in range(len(inter)):
+        for ro in range(len(comment_inter)):
             for i in range(8):
                 ok_no_list_list[ro][i].config(text="-")
-                hour_list_list[ro][i].config(text="-")
+        for i in range(8):
+            hour_labels_4h[i].config(text="-")
 
         rows = load_history_from_access(
             CHECK_DB_PATH,
@@ -435,20 +437,28 @@ def build_ui(rec_type="PIT"):
             "4H"
         )
 
-        grouped = defaultdict(list)
-
+        hours_by_furnace = defaultdict(set)
         for furnace_name, hour in rows:
-            grouped[furnace_name].append(hour)
-
-        # 配置
-        for furnace_name, hours in grouped.items():
             if furnace_name not in comment_inter:
                 continue
-            col_index = inter.index(furnace_name)
+            try:
+                hour_int = int(hour)
+            except Exception:
+                continue
+            if 0 <= hour_int <= 23:
+                hours_by_furnace[furnace_name].add(hour_int)
 
-            for row_index, hour in enumerate(hours[:8]):
-                hour_list_list[col_index][row_index].config(text=str(hour))
-                ok_no_list_list[col_index][row_index].config(text="OK")
+        # その日付で存在する「時刻」を左端に1回だけ表示し、同時刻にデータがある炉だけOKにする
+        all_hours = sorted({h for hs in hours_by_furnace.values() for h in hs}, reverse=True)[:8]
+
+        for row_index, hour_int in enumerate(all_hours):
+            target_index = 7 - row_index
+            hour_labels_4h[target_index].config(text=str(hour_int))
+            for furnace_name, hs in hours_by_furnace.items():
+                if hour_int not in hs:
+                    continue
+                col_index = comment_inter.index(furnace_name)
+                ok_no_list_list[col_index][target_index].config(text="OK")
 
     def recoreco(i):
         four_record(i)
