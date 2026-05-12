@@ -53,7 +53,7 @@ def load_history_from_access(
         end_dt = start_dt + timedelta(days=1)
         # 上記の日付範囲とtypeから欲しい情報を求める
         sql = """
-            SELECT 炉名, hour, 記録日時
+            SELECT 炉名, hour, 記録日時, テキストボックス入力内容
             FROM チェック履歴
             WHERE [type] = ?
             AND 記録日時 >= ?
