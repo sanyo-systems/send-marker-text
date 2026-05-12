@@ -70,6 +70,7 @@ def build_ui(rec_type="PIT"):
     # UI（レイアウト構造のみ改善 / 既存機能は変更しない）
     # =====================================================
     UI_PAD = 8  # 余白（8〜10pxで統一）
+    INPUT_PAD = 6  # チェックエリアの余白削減 # 高さ配分調整
     CELL_PADX = 6
     CELL_PADY = 3
 
@@ -80,6 +81,14 @@ def build_ui(rec_type="PIT"):
     COLOR_TEXT = "#333333"
     COLOR_HEADER_BG = "#EEF2F6"
     COLOR_STRIPE_BG = "#FAFBFC"
+    COLOR_BTN_BG = "#E3E8EF"
+    COLOR_BTN_HOVER = "#D0D7E2"
+    COLOR_BTN_PRIMARY = "#4C6EF5"
+    COLOR_BTN_PRIMARY_HOVER = "#3B5BDB"
+
+    COLOR_STATUS_OK = "#2E7D32"
+    COLOR_STATUS_STOP = "#C62828"
+    COLOR_STATUS_WARN = "#ED6C02"
 
     FONT_BASE = ("Meiryo UI", 10)
     FONT_TITLE = ("Meiryo UI", 13, "bold")
@@ -178,9 +187,30 @@ def build_ui(rec_type="PIT"):
     style.configure("App.TableHeader.TLabel", background=COLOR_HEADER_BG, foreground=COLOR_TEXT, font=FONT_HEADER)
     style.configure("App.Small.TLabel", background=COLOR_RIGHT_BG, foreground=COLOR_TEXT, font=FONT_SMALL)
 
+    # ボタン（通常/主要アクション）
+    style.configure("TButton", padding=(10, 4), background=COLOR_BTN_BG, foreground=COLOR_TEXT)
+    style.map("TButton", background=[("active", COLOR_BTN_HOVER)])
+    style.configure("App.Primary.TButton", padding=(10, 4), background=COLOR_BTN_PRIMARY, foreground="#FFFFFF")
+    style.map("App.Primary.TButton", background=[("active", COLOR_BTN_PRIMARY_HOVER)])
+
     def bind_enter_to_button(button):
         button.bind("<Return>", lambda event: button.invoke())
         button.bind("<KP_Enter>", lambda event: button.invoke())
+
+    def _set_status_label(label, text):
+        # 表示のみ（判定ロジックは変更しない）
+        label.config(text=text)
+        fg = COLOR_TEXT
+        if text == "OK":
+            fg = COLOR_STATUS_OK
+        elif text == "止":
+            fg = COLOR_STATUS_STOP
+        elif text == "遅":
+            fg = COLOR_STATUS_WARN
+        try:
+            label.config(foreground=fg)
+        except Exception:
+            pass
 
     # =====================================================
     # 画面全体：左右2カラム（grid weight 3:7）
@@ -203,8 +233,8 @@ def build_ui(rec_type="PIT"):
     furnace_label.grid(row=0, column=0, sticky="w", pady=(0, UI_PAD))
 
     # 役割：① 1H/4Hチェック（最も大きく）
-    input_frame = ttk.LabelFrame(left_frame, text="1H/4Hチェック", padding=UI_PAD)
-    input_frame.grid(row=1, column=0, sticky="nsew", pady=(0, UI_PAD))
+    input_frame = ttk.LabelFrame(left_frame, text="1H/4Hチェック", padding=INPUT_PAD)  # 高さ配分調整
+    input_frame.grid(row=1, column=0, sticky="nsew", pady=(0, INPUT_PAD))  # 高さ配分調整
     input_frame.grid_columnconfigure(4, weight=1)  # 登録ボタン右寄せ用
 
     # 役割：② 任意コメント（中サイズ）
@@ -223,12 +253,13 @@ def build_ui(rec_type="PIT"):
     before_frame = ttk.LabelFrame(left_frame, text="通信ログ", padding=UI_PAD)
     before_frame.grid(row=before_frame_row, column=0, sticky="nsew")
 
-    # 左カラムの高さ配分（チェック＞コメント＞ログ）
-    left_frame.grid_rowconfigure(1, weight=5)
-    left_frame.grid_rowconfigure(2, weight=2)
+    # 左カラムの高さ配分（チェック/コメント/通信ログのバランス調整） # 高さ配分調整
+    # - チェック:3 / コメント:2 / 通信ログ:3（appoint_frameがある場合はappointのみ最小）
+    left_frame.grid_rowconfigure(1, weight=3)  # 高さ配分調整
+    left_frame.grid_rowconfigure(2, weight=2)  # 高さ配分調整
     if appoint_frame is not None:
-        left_frame.grid_rowconfigure(3, weight=1)
-    left_frame.grid_rowconfigure(before_frame_row, weight=1)
+        left_frame.grid_rowconfigure(3, weight=1)  # 高さ配分調整（予約枠は最小）
+    left_frame.grid_rowconfigure(before_frame_row, weight=3)  # 高さ配分調整（通信ログ拡張）
 
     # --- 右カラム（履歴エリア） ---
     # 重要：履歴エリア全体を「1つの大きな枠」で囲う（1H/4Hは個別に枠で囲わない）
@@ -392,12 +423,13 @@ def build_ui(rec_type="PIT"):
     ok_no_list_list_1h = []
     hour_labels_1h = []
     status_labels_1h = []
-    input_time_labels_1h = []
-    day_day_1h = ttk.Label(one_check_frame, text="-")
+    input_time_labels_1h = []  # コンフリクト解消
+    # ヘッダ行（列構成：「日」「時刻」「判定」「入力時刻」＋各炉）を維持  # コンフリクト解消
+    day_day_1h = ttk.Label(one_check_frame, text="-", style="App.TableHeader.TLabel")
     day_day_1h.grid(row=0, column=0)
-    ttk.Label(one_check_frame, text="時刻").grid(row=0, column=1)
-    ttk.Label(one_check_frame, text="判定").grid(row=0, column=2)
-    ttk.Label(one_check_frame, text="入力時刻").grid(row=0, column=3)
+    ttk.Label(one_check_frame, text="時刻", style="App.TableHeader.TLabel").grid(row=0, column=1)
+    ttk.Label(one_check_frame, text="判定", style="App.TableHeader.TLabel").grid(row=0, column=2)
+    ttk.Label(one_check_frame, text="入力時刻", style="App.TableHeader.TLabel").grid(row=0, column=3)
     for i in range(24):
         lbl_hour = ttk.Label(one_check_frame, text=f"{i}")
         lbl_hour.grid(row=24 - i, column=1)
@@ -411,7 +443,7 @@ def build_ui(rec_type="PIT"):
 
     for ro in range(len(comment_inter)):
         ok_no_list = []
-        ttk.Label(one_check_frame, text=comment_inter[ro]).grid(row=0, column=4 + ro)
+        ttk.Label(one_check_frame, text=comment_inter[ro], style="App.TableHeader.TLabel").grid(row=0, column=4 + ro)  # コンフリクト解消
         for i in range(24):
             ok_no = ttk.Label(one_check_frame, text="止")
             ok_no.grid(row=24 - i, column=ro + 4)
@@ -476,8 +508,8 @@ def build_ui(rec_type="PIT"):
             for i in range(24):
                 ok_no_list_list_1h[ro][i].config(text="止")
         for i in range(24):
-            status_labels_1h[i].config(text="止")
-            input_time_labels_1h[i].config(text="-")
+            _set_status_label(status_labels_1h[i], "止")  # コンフリクト解消（判定は必ず _set_status_label）
+            input_time_labels_1h[i].config(text="-")  # コンフリクト解消（入力時刻は必ず初期化）
 
         rows = load_history_from_access(
             CHECK_DB_PATH,
@@ -506,15 +538,15 @@ def build_ui(rec_type="PIT"):
                 hour_status[hour_int] = st
 
         for hour_int, st in hour_status.items():
-            status_labels_1h[hour_int].config(text=st)
+            _set_status_label(status_labels_1h[hour_int], st)  # コンフリクト解消（判定は必ず _set_status_label）
         for hour_int, dt in hour_latest_dt.items():
-            input_time_labels_1h[hour_int].config(text=_format_hhmm(dt))
+            input_time_labels_1h[hour_int].config(text=_format_hhmm(dt))  # コンフリクト解消（入力時刻表示）
 
         # 最新時刻より先（まだ入力されていない領域）は「止」ではなく「-」で表示する
         if max_recorded_hour is not None:
             for hour_int in range(max_recorded_hour + 1, 24):
-                status_labels_1h[hour_int].config(text="-")
-                input_time_labels_1h[hour_int].config(text="-")
+                _set_status_label(status_labels_1h[hour_int], "-")  # コンフリクト解消（判定は必ず _set_status_label）
+                input_time_labels_1h[hour_int].config(text="-")  # コンフリクト解消（入力時刻表示）
                 for ro in range(len(comment_inter)):
                     ok_no_list_list_1h[ro][hour_int].config(text="-")
 
@@ -532,11 +564,12 @@ def build_ui(rec_type="PIT"):
     hour_labels_4h = []
     status_labels_4h = []
     input_time_labels_4h = []
-    day_day_4h = ttk.Label(four__check_frame, text="-")
+    # ヘッダ行（列構成：「日」「時刻」「判定」「入力時刻」＋各炉）を維持  # コンフリクト解消
+    day_day_4h = ttk.Label(four__check_frame, text="-", style="App.TableHeader.TLabel")
     day_day_4h.grid(row=0, column=0)
-    ttk.Label(four__check_frame, text="時刻").grid(row=0, column=1)
-    ttk.Label(four__check_frame, text="判定").grid(row=0, column=2)
-    ttk.Label(four__check_frame, text="入力時刻").grid(row=0, column=3)
+    ttk.Label(four__check_frame, text="時刻", style="App.TableHeader.TLabel").grid(row=0, column=1)
+    ttk.Label(four__check_frame, text="判定", style="App.TableHeader.TLabel").grid(row=0, column=2)
+    ttk.Label(four__check_frame, text="入力時刻", style="App.TableHeader.TLabel").grid(row=0, column=3)
     for i in range(8):
         hour = ttk.Label(four__check_frame, text="-")
         hour.grid(row=8 - i, column=1)
@@ -550,7 +583,7 @@ def build_ui(rec_type="PIT"):
 
     for ro in range(len(comment_inter)):
         ok_no_list = []
-        ttk.Label(four__check_frame, text=comment_inter[ro]).grid(row=0, column=4 + ro)
+        ttk.Label(four__check_frame, text=comment_inter[ro], style="App.TableHeader.TLabel").grid(row=0, column=4 + ro)  # コンフリクト解消
         for i in range(8):
             ok_no = ttk.Label(four__check_frame, text="止")
             ok_no.grid(row=8 - i, column=4 + ro)
@@ -580,8 +613,8 @@ def build_ui(rec_type="PIT"):
                 ok_no_list_list[ro][i].config(text="-")
         for i in range(8):
             hour_labels_4h[i].config(text="-")
-            status_labels_4h[i].config(text="-")
-            input_time_labels_4h[i].config(text="-")
+            _set_status_label(status_labels_4h[i], "-")  # コンフリクト解消（判定は必ず _set_status_label）
+            input_time_labels_4h[i].config(text="-")  # コンフリクト解消（入力時刻は必ず初期化）
 
         rows = load_history_from_access(
             CHECK_DB_PATH,
@@ -628,8 +661,8 @@ def build_ui(rec_type="PIT"):
                     best_status = st
                 if best_dt is None or record["dt"] > best_dt:
                     best_dt = record["dt"]
-            status_labels_4h[target_index].config(text=best_status if best_status is not None else "-")
-            input_time_labels_4h[target_index].config(text=_format_hhmm(best_dt) if best_dt else "-")
+            _set_status_label(status_labels_4h[target_index], best_status if best_status is not None else "-")  # コンフリクト解消
+            input_time_labels_4h[target_index].config(text=_format_hhmm(best_dt) if best_dt else "-")  # コンフリクト解消（入力時刻表示）
 
             # 表示対象の時刻でデータが無い炉は「止」で表現する
             for furnace_name in comment_inter:
@@ -648,11 +681,11 @@ def build_ui(rec_type="PIT"):
     # 表示履歴の切り替えボタン
     for i in range(3):
         if i == 0:
-            btn_ok = ttk.Button(filter_frame, text="本日", command=lambda i=i: recoreco(i), takefocus=True)
+            btn_ok = ttk.Button(filter_frame, text="本日", command=lambda i=i: recoreco(i), takefocus=True, width=8)
         elif i == 1:
-            btn_ok = ttk.Button(filter_frame, text="昨日", command=lambda i=i: recoreco(i), takefocus=True)
+            btn_ok = ttk.Button(filter_frame, text="昨日", command=lambda i=i: recoreco(i), takefocus=True, width=8)
         else:
-            btn_ok = ttk.Button(filter_frame, text="一昨日", command=lambda i=i: recoreco(i), takefocus=True)
+            btn_ok = ttk.Button(filter_frame, text="一昨日", command=lambda i=i: recoreco(i), takefocus=True, width=8)
         btn_ok.bind("<Return>", lambda _e, b=btn_ok: b.invoke())
         btn_ok.bind("<KP_Enter>", lambda _e, b=btn_ok: b.invoke())
         btn_ok.grid(row=0, column=i, padx=(0, UI_PAD))
@@ -944,12 +977,12 @@ def build_ui(rec_type="PIT"):
     bind_enter_to_button(btn_ok)
 
     # ボタンOK関数起動
-    btn_ok = ttk.Button(input_frame, text="登録", command=on_ok)
-    btn_ok.grid(row=action_row, column=4, padx=(8, 0))
+    btn_ok = ttk.Button(input_frame, text="登録", command=on_ok, style="App.Primary.TButton")
+    btn_ok.grid(row=action_row, column=4, padx=(UI_PAD, 0))
     bind_enter_to_button(btn_ok)
 
     # 送信でコメント送信
-    btn_ok = ttk.Button(coment_frame, text="登録", command=on_comment)
+    btn_ok = ttk.Button(coment_frame, text="登録", command=on_comment, style="App.Primary.TButton")
     btn_ok.grid(row=0, column=4)
     bind_enter_to_button(btn_ok)
 
