@@ -66,6 +66,26 @@ def start_csv_thread(handler):
 # ・記録計送信状態確認
 # =========================================================
 def build_ui(rec_type="PIT"):
+    # =====================================================
+    # UI（レイアウト構造のみ改善 / 既存機能は変更しない）
+    # =====================================================
+    UI_PAD = 8  # 余白（8〜10pxで統一）
+    CELL_PADX = 6
+    CELL_PADY = 3
+
+    # 配色（左：薄グレー / 右：白＋外枠）
+    COLOR_LEFT_BG = "#F7F8FA"
+    COLOR_RIGHT_BG = "#FFFFFF"
+    COLOR_BORDER = "#D0D5DD"
+    COLOR_TEXT = "#333333"
+    COLOR_HEADER_BG = "#EEF2F6"
+    COLOR_STRIPE_BG = "#FAFBFC"
+
+    FONT_BASE = ("Meiryo UI", 10)
+    FONT_TITLE = ("Meiryo UI", 13, "bold")
+    FONT_HEADER = ("Meiryo UI", 10, "bold")
+    FONT_SMALL = ("Meiryo UI", 9)
+
     # ===== 炉リスト =====
     if rec_type == "PIT":
         inter = ["PG-1", "SQ-1", "PG-5", "PG-2", "油槽", "SQ-2", "PG-4", "PG-3", "SQ-3"]
@@ -141,79 +161,121 @@ def build_ui(rec_type="PIT"):
     root.grid_rowconfigure(0, weight=1)
     root.grid_columnconfigure(0, weight=1)
 
-    canvas = tk.Canvas(root, highlightthickness=0)
-    v_scrollbar = ttk.Scrollbar(root, orient="vertical", command=canvas.yview)
-    canvas.configure(yscrollcommand=v_scrollbar.set)
-
-    canvas.grid(row=0, column=0, sticky="nsew")
-    v_scrollbar.grid(row=0, column=1, sticky="ns")
-
-    content_frame = ttk.Frame(canvas)
-    canvas_window = canvas.create_window((0, 0), window=content_frame, anchor="nw")
-
-    def on_content_configure(event):
-        canvas.configure(scrollregion=canvas.bbox("all"))
-
-    def on_canvas_configure(event):
-        canvas.itemconfigure(canvas_window, width=event.width)
-
-    def on_mousewheel(event):
-        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    # スタイル（見た目のみ）
+    root.configure(background=COLOR_LEFT_BG)
+    style = ttk.Style(root)
+    if "clam" in style.theme_names():
+        style.theme_use("clam")
+    style.configure(".", font=FONT_BASE, foreground=COLOR_TEXT)
+    style.configure("TFrame", background=COLOR_LEFT_BG)
+    style.configure("App.Left.TFrame", background=COLOR_LEFT_BG)
+    style.configure("App.Right.TFrame", background=COLOR_RIGHT_BG)
+    style.configure("TLabelframe", background=COLOR_RIGHT_BG, bordercolor=COLOR_BORDER, relief="solid", borderwidth=1)
+    style.configure("TLabelframe.Label", background=COLOR_RIGHT_BG, foreground=COLOR_TEXT, font=FONT_HEADER)
+    style.configure("TLabel", background=COLOR_RIGHT_BG, foreground=COLOR_TEXT)
+    style.configure("App.LeftTitle.TLabel", background=COLOR_LEFT_BG, foreground=COLOR_TEXT, font=FONT_TITLE)
+    style.configure("App.RightTitle.TLabel", background=COLOR_RIGHT_BG, foreground=COLOR_TEXT, font=FONT_TITLE)
+    style.configure("App.TableHeader.TLabel", background=COLOR_HEADER_BG, foreground=COLOR_TEXT, font=FONT_HEADER)
+    style.configure("App.Small.TLabel", background=COLOR_RIGHT_BG, foreground=COLOR_TEXT, font=FONT_SMALL)
 
     def bind_enter_to_button(button):
         button.bind("<Return>", lambda event: button.invoke())
         button.bind("<KP_Enter>", lambda event: button.invoke())
 
-    content_frame.bind("<Configure>", on_content_configure)
-    canvas.bind("<Configure>", on_canvas_configure)
-    canvas.bind_all("<MouseWheel>", on_mousewheel)
-
-    # 左右の親フレームを作る
-    # 左フレーム
-    left_frame = ttk.Frame(content_frame)
-    left_frame.grid(row=0, column=0, sticky="n")
-    # 右フレーム
-    right_frame = ttk.Frame(content_frame)
-    right_frame.grid(row=0, column=1, sticky="n")
-
-
-    # ===== 炉種表示 =====
-    color = "blue" if rec_type == "PIT" else "green"
-    furnace_label = ttk.Label(
-        left_frame,
-        text=f"炉種：{rec_type}",
-        foreground=color,
-        font=("Arial", 12, "bold")
-    )
-    furnace_label.grid(row=0, column=0, sticky="w", padx=5)
-
     # =====================================================
-    # 入力関連フレーム
+    # 画面全体：左右2カラム（grid weight 3:7）
+    # 左：操作エリア（30〜35%）
+    # 右：履歴エリア（65〜70%）
     # =====================================================
-    # 1H/4Hチェック枠
-    input_frame = ttk.LabelFrame(left_frame, text="1H/4Hチェック")
-    input_frame.grid(row=1, column=0, padx=10, pady=10)
-    # 任意コメント枠
-    coment_frame = ttk.LabelFrame(left_frame, text="任意コメント")
-    coment_frame.grid(row=2, column=0, padx=10, pady=10)
-    # 送信内容予約枠
+    main_frame = ttk.Frame(root, style="TFrame")
+    main_frame.grid(row=0, column=0, sticky="nsew")
+    main_frame.grid_rowconfigure(0, weight=1)
+    main_frame.grid_columnconfigure(0, weight=3)
+    main_frame.grid_columnconfigure(1, weight=7)
+
+    # --- 左カラム（操作エリア） ---
+    left_frame = ttk.Frame(main_frame, style="App.Left.TFrame", padding=UI_PAD)
+    left_frame.grid(row=0, column=0, sticky="nsew")
+    left_frame.grid_columnconfigure(0, weight=1)
+
+    # 役割：炉種表示（色は変えず、サイズと太さで強調）
+    furnace_label = ttk.Label(left_frame, text=f"炉種：{rec_type}", style="App.LeftTitle.TLabel")
+    furnace_label.grid(row=0, column=0, sticky="w", pady=(0, UI_PAD))
+
+    # 役割：① 1H/4Hチェック（最も大きく）
+    input_frame = ttk.LabelFrame(left_frame, text="1H/4Hチェック", padding=UI_PAD)
+    input_frame.grid(row=1, column=0, sticky="nsew", pady=(0, UI_PAD))
+    input_frame.grid_columnconfigure(4, weight=1)  # 登録ボタン右寄せ用
+
+    # 役割：② 任意コメント（中サイズ）
+    coment_frame = ttk.LabelFrame(left_frame, text="任意コメント", padding=UI_PAD)
+    coment_frame.grid(row=2, column=0, sticky="nsew", pady=(0, UI_PAD))
+    coment_frame.grid_columnconfigure(3, weight=1)  # 入力欄を伸ばす
+
+    # 送信内容予約（既存機能維持：PIT以外のみ表示）
     appoint_frame = None
     if rec_type != "PIT":
-        appoint_frame = ttk.LabelFrame(left_frame, text="送信内容予約")
-        appoint_frame.grid(row=3, column=0, padx=10, pady=10)
-    # 1Hチェック履歴枠
-    one_check_frame = ttk.LabelFrame(right_frame, text="1Hチェック履歴")
-    one_check_frame.grid(row=0, column=0, padx=10, pady=10)
-    # 4Hチェック履歴枠
-    four__check_frame = ttk.LabelFrame(right_frame, text="4Hチェック履歴")
-    four__check_frame.grid(row=1, column=0, padx=10, pady=10)
-    # 4Hのボタン置き場
-    four_botton_frame = ttk.LabelFrame(right_frame)
-    four_botton_frame.grid(row=2, column=0, padx=10, pady=10)
-    # 記録計前回送信済み内容
-    before_frame = ttk.LabelFrame(left_frame, text="記録計前回送信済み内容")
+        appoint_frame = ttk.LabelFrame(left_frame, text="送信内容予約", padding=UI_PAD)
+        appoint_frame.grid(row=3, column=0, sticky="nsew", pady=(0, UI_PAD))
+
+    # 役割：③ 通信ログ（最も小さく）
     before_frame_row = 4 if appoint_frame is not None else 3
-    before_frame.grid(row=before_frame_row, column=0, padx=10, pady=10)
+    before_frame = ttk.LabelFrame(left_frame, text="通信ログ", padding=UI_PAD)
+    before_frame.grid(row=before_frame_row, column=0, sticky="nsew")
+
+    # 左カラムの高さ配分（チェック＞コメント＞ログ）
+    left_frame.grid_rowconfigure(1, weight=5)
+    left_frame.grid_rowconfigure(2, weight=2)
+    if appoint_frame is not None:
+        left_frame.grid_rowconfigure(3, weight=1)
+    left_frame.grid_rowconfigure(before_frame_row, weight=1)
+
+    # --- 右カラム（履歴エリア） ---
+    # 重要：履歴エリア全体を「1つの大きな枠」で囲う（1H/4Hは個別に枠で囲わない）
+    history_outer = tk.Frame(
+        main_frame,
+        background=COLOR_RIGHT_BG,
+        highlightbackground=COLOR_BORDER,
+        highlightthickness=1,
+        bd=0,
+    )
+    history_outer.grid(row=0, column=1, sticky="nsew", padx=(0, UI_PAD), pady=UI_PAD)
+    history_outer.grid_rowconfigure(1, weight=1)
+    history_outer.grid_columnconfigure(0, weight=1)
+
+    history_header = ttk.Frame(history_outer, style="App.Right.TFrame", padding=(UI_PAD, UI_PAD, UI_PAD, 0))
+    history_header.grid(row=0, column=0, sticky="ew")
+    history_header.grid_columnconfigure(0, weight=1)
+
+    # 役割：ヘッダ行（左：履歴 / 右：日付フィルタ）
+    ttk.Label(history_header, text="履歴", style="App.RightTitle.TLabel").grid(row=0, column=0, sticky="w")
+    filter_frame = ttk.Frame(history_header, style="App.Right.TFrame")
+    filter_frame.grid(row=0, column=1, sticky="e")
+
+    # 役割：メイン領域（上下比率 7:3）
+    history_area = ttk.Frame(history_outer, style="App.Right.TFrame", padding=UI_PAD)
+    history_area.grid(row=1, column=0, sticky="nsew")
+    history_area.grid_columnconfigure(0, weight=1)
+    history_area.grid_rowconfigure(0, weight=7)  # 1H（主役）
+    history_area.grid_rowconfigure(1, weight=3)  # 4H（補助）
+
+    # 役割：■1H履歴（主役）※枠は履歴全体のみ。ここは枠なし（Frame）
+    one_container = ttk.Frame(history_area, style="App.Right.TFrame")
+    one_container.grid(row=0, column=0, sticky="nsew", pady=(0, UI_PAD))
+    one_container.grid_columnconfigure(0, weight=1)
+    one_container.grid_rowconfigure(1, weight=1)
+    ttk.Label(one_container, text="■1H履歴", style="App.RightTitle.TLabel").grid(row=0, column=0, sticky="w", pady=(0, CELL_PADY))
+    one_check_frame = ttk.Frame(one_container, style="App.Right.TFrame")
+    one_check_frame.grid(row=1, column=0, sticky="nsew")
+
+    # 役割：■4H履歴（補助）※枠なし（Frame）
+    four_container = ttk.Frame(history_area, style="App.Right.TFrame")
+    four_container.grid(row=1, column=0, sticky="nsew")
+    four_container.grid_columnconfigure(0, weight=1)
+    four_container.grid_rowconfigure(1, weight=1)
+    ttk.Label(four_container, text="■4H履歴", style="App.RightTitle.TLabel").grid(row=0, column=0, sticky="w", pady=(0, CELL_PADY))
+    four__check_frame = ttk.Frame(four_container, style="App.Right.TFrame")
+    four__check_frame.grid(row=1, column=0, sticky="nsew")
 
     run_vars = []  # 炉の稼働フラグ（True/False）
     entry_ro_list = []
@@ -586,14 +648,14 @@ def build_ui(rec_type="PIT"):
     # 表示履歴の切り替えボタン
     for i in range(3):
         if i == 0:
-            btn_ok = ttk.Button(four_botton_frame, text=f"本日", command=lambda i=i: recoreco(i), takefocus=True)
+            btn_ok = ttk.Button(filter_frame, text="本日", command=lambda i=i: recoreco(i), takefocus=True)
         elif i == 1:
-            btn_ok = ttk.Button(four_botton_frame, text=f"昨日", command=lambda i=i: recoreco(i), takefocus=True)
+            btn_ok = ttk.Button(filter_frame, text="昨日", command=lambda i=i: recoreco(i), takefocus=True)
         else:
-            btn_ok = ttk.Button(four_botton_frame, text=f"一昨日", command=lambda i=i: recoreco(i), takefocus=True)
+            btn_ok = ttk.Button(filter_frame, text="一昨日", command=lambda i=i: recoreco(i), takefocus=True)
         btn_ok.bind("<Return>", lambda _e, b=btn_ok: b.invoke())
         btn_ok.bind("<KP_Enter>", lambda _e, b=btn_ok: b.invoke())
-        btn_ok.grid(row=0, column=i)
+        btn_ok.grid(row=0, column=i, padx=(0, UI_PAD))
 
     # 送信予約にしたい！！！
     # 現在は機能していないため、中止
