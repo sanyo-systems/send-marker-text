@@ -70,7 +70,8 @@ def build_ui(rec_type="PIT"):
     # UI（レイアウト構造のみ改善 / 既存機能は変更しない）
     # =====================================================
     UI_PAD = 8  # 余白（8〜10pxで統一）
-    INPUT_PAD = 6  # チェックエリアの余白削減 # 高さ配分調整
+    INPUT_PAD = 5  # チェックエリアの余白削減 # 高さバランス調整
+    INPUT_ROW_PADY = 1  # チェックエリア行間を軽く詰める # 高さバランス調整
     CELL_PADX = 6
     CELL_PADY = 3
 
@@ -253,13 +254,13 @@ def build_ui(rec_type="PIT"):
     before_frame = ttk.LabelFrame(left_frame, text="通信ログ", padding=UI_PAD)
     before_frame.grid(row=before_frame_row, column=0, sticky="nsew")
 
-    # 左カラムの高さ配分（チェック/コメント/通信ログのバランス調整） # 高さ配分調整
-    # - チェック:3 / コメント:2 / 通信ログ:3（appoint_frameがある場合はappointのみ最小）
-    left_frame.grid_rowconfigure(1, weight=3)  # 高さ配分調整
-    left_frame.grid_rowconfigure(2, weight=2)  # 高さ配分調整
+    # 左カラムの高さ配分（チェック/コメント/通信ログのバランス調整） # 高さバランス調整
+    # - チェック:2 / コメント:2 / 通信ログ:4（appoint_frameがある場合はappointのみ最小）
+    left_frame.grid_rowconfigure(1, weight=2)  # 高さバランス調整
+    left_frame.grid_rowconfigure(2, weight=2)  # 高さバランス調整
     if appoint_frame is not None:
-        left_frame.grid_rowconfigure(3, weight=1)  # 高さ配分調整（予約枠は最小）
-    left_frame.grid_rowconfigure(before_frame_row, weight=3)  # 高さ配分調整（通信ログ拡張）
+        left_frame.grid_rowconfigure(3, weight=1)  # 高さバランス調整（予約枠は最小）
+    left_frame.grid_rowconfigure(before_frame_row, weight=4)  # 高さバランス調整（通信ログ拡張）
 
     # --- 右カラム（履歴エリア） ---
     # 重要：履歴エリア全体を「1つの大きな枠」で囲う（1H/4Hは個別に枠で囲わない）
@@ -322,9 +323,9 @@ def build_ui(rec_type="PIT"):
     # ・測定温度入力
     # を生成する
     # =====================================================
-    ttk.Label(input_frame, text="稼働").grid(row=0, column=0)
-    ttk.Label(input_frame, text=f"炉名").grid(row=0, column=1)
-    ttk.Label(input_frame, text=f"測定温度").grid(row=0, column=2)
+    ttk.Label(input_frame, text="稼働").grid(row=0, column=0, pady=INPUT_ROW_PADY)  # 高さバランス調整
+    ttk.Label(input_frame, text=f"炉名").grid(row=0, column=1, pady=INPUT_ROW_PADY)  # 高さバランス調整
+    ttk.Label(input_frame, text=f"測定温度").grid(row=0, column=2, pady=INPUT_ROW_PADY)  # 高さバランス調整
 
     def update_entry_state(var, entry):
         is_running = bool(var.get())
@@ -343,10 +344,10 @@ def build_ui(rec_type="PIT"):
         # 炉の番号
         ro = i
         # ===== 全炉共通レイアウト（縦並び）=====
-        ttk.Label(input_frame, text=inter[i], font=("Arial", 10, "bold")).grid(row=i+1, column=1)
+        ttk.Label(input_frame, text=inter[i], font=("Arial", 10, "bold")).grid(row=i+1, column=1, pady=INPUT_ROW_PADY)  # 高さバランス調整
 
         e_act = ttk.Entry(input_frame, width=8, takefocus=False)
-        e_act.grid(row=i + 1, column=2)
+        e_act.grid(row=i + 1, column=2, pady=INPUT_ROW_PADY)  # 高さバランス調整
 
         chk = ttk.Checkbutton(
             input_frame,
@@ -356,7 +357,7 @@ def build_ui(rec_type="PIT"):
             takefocus=False,
             command=lambda var=var, entry=e_act: update_entry_state(var, entry)
         )
-        chk.grid(row=i + 1, column=0)
+        chk.grid(row=i + 1, column=0, pady=INPUT_ROW_PADY)  # 高さバランス調整
         furnace_checkbuttons.append(chk)
         update_entry_state(var, e_act)
         # リストにactで各々まとめる
@@ -365,12 +366,12 @@ def build_ui(rec_type="PIT"):
     
     # 入力者　入力欄作成
     action_row = len(inter) + 1
-    ttk.Label(input_frame, text="1Hチェック確認者").grid(row=action_row, column=0, padx=(0, 4))
+    ttk.Label(input_frame, text="1Hチェック確認者").grid(row=action_row, column=0, padx=(0, 4), pady=INPUT_ROW_PADY)  # 高さバランス調整
     one_person = ttk.Entry(input_frame, width=8)
-    one_person.grid(row=action_row, column=1, padx=(0, 12))
-    ttk.Label(input_frame, text="4Hチェック確認者").grid(row=action_row, column=2, padx=(0, 4))
+    one_person.grid(row=action_row, column=1, padx=(0, 12), pady=INPUT_ROW_PADY)  # 高さバランス調整
+    ttk.Label(input_frame, text="4Hチェック確認者").grid(row=action_row, column=2, padx=(0, 4), pady=INPUT_ROW_PADY)  # 高さバランス調整
     four_person = ttk.Entry(input_frame, width=8)
-    four_person.grid(row=action_row, column=3, padx=(0, 12))
+    four_person.grid(row=action_row, column=3, padx=(0, 12), pady=INPUT_ROW_PADY)  # 高さバランス調整
 
 
     # =====================================================
