@@ -16,7 +16,15 @@ import configparser
 from database.access_writer import insert_check_history_batch
 from monitoring.logger_config import setup_logger
 from database.check_history import load_latest_history, load_latest_csv_history
-from csv_monitor.csv_watcher import start_csv_watch, CSVHandler
+from csv_monitor.csv_watcher import (
+    start_csv_watch,
+    CSVHandler,
+    WATCH_FOLDER,
+    read_csv_and_process,
+    split_instruction_list,
+    normalize_history_value,
+)
+from utils.csv_utils import move_csv_done
 from communication.send_queue import start_worker
 from csv_monitor.retry_worker import retry_loop
 from monitoring.health_monitor import heartbeat_loop
@@ -695,6 +703,8 @@ def build_ui(rec_type="PIT"):
     # 現在は機能していないため、中止
     if appoint_frame is not None:
         apo_list = []
+        apo_map = {}
+        apo_cancel_buttons = {}
         #　予約内容と取り消しボタン
         for i, furnace in enumerate(inter):
             ttk.Label(appoint_frame, text=furnace).grid(row=i, column=0)
@@ -702,11 +712,121 @@ def build_ui(rec_type="PIT"):
             lbl_apo = ttk.Label(appoint_frame, text="-")
             lbl_apo.grid(row=i, column=2)
             apo_list.append(lbl_apo)
+            apo_map[furnace] = lbl_apo
 
         # 取り消しボタン
         for i in range(len(inter)):
-            btn_ok = ttk.Button(appoint_frame, text="取消", command="")
+            furnace_name = inter[i]
+            btn_ok = ttk.Button(appoint_frame, text="取消")
             btn_ok.grid(row=i, column=3)
+            apo_cancel_buttons[furnace_name] = btn_ok
+
+        def _normalize_furnace_from_filename(filename):
+            if not filename:
+                return ""
+            name = os.path.splitext(os.path.basename(filename))[0]
+            if name.upper().startswith("RE"):
+                name = name[2:]
+            return name
+
+        def cancel_appointments_for_furnace(furnace_name):
+            rec = get_recorder_config(furnace_name)
+            expected_csv = rec.get("file") if rec else None
+            expected_csv_lower = expected_csv.lower() if expected_csv else None
+
+            try:
+                files = [
+                    f for f in os.listdir(WATCH_FOLDER)
+                    if f.lower().endswith(".csv")
+                ]
+            except Exception:
+                return
+
+            target_files = []
+            for f in files:
+                f_lower = f.lower()
+                if expected_csv_lower and f_lower == expected_csv_lower:
+                    target_files.append(f)
+                    continue
+                if _normalize_furnace_from_filename(f) == furnace_name:
+                    target_files.append(f)
+
+            for f in sorted(set(target_files)):
+                try:
+                    move_csv_done(os.path.join(WATCH_FOLDER, f))
+                except Exception:
+                    pass
+
+            refresh_appointment_ui()
+
+        for furnace_name, btn in apo_cancel_buttons.items():
+            btn.configure(command=lambda f=furnace_name: cancel_appointments_for_furnace(f))
+
+        def refresh_appointment_ui():
+            now = datetime.now()
+            furnace_entries = defaultdict(list)
+
+            try:
+                if os.path.isdir(WATCH_FOLDER):
+                    files = [
+                        f for f in os.listdir(WATCH_FOLDER)
+                        if f.lower().endswith(".csv")
+                    ]
+                else:
+                    files = []
+            except Exception:
+                files = []
+
+            for filename in files:
+                path = os.path.join(WATCH_FOLDER, filename)
+                try:
+                    data = read_csv_and_process(path)
+                except Exception:
+                    continue
+
+                if not data:
+                    continue
+
+                end_time_str = data.get("end_time")
+                if not end_time_str:
+                    continue
+
+                normalized_end_time = normalize_history_value(str(end_time_str).strip())
+                if normalized_end_time is None:
+                    continue
+
+                try:
+                    send_dt = datetime.strptime(normalized_end_time, "%Y%m%d%H%M%S")
+                except Exception:
+                    continue
+
+                furnace_name = _normalize_furnace_from_filename(filename)
+                if not furnace_name:
+                    continue
+
+                instruction_list = data.get("instruction_list") or []
+                for instruction_group in split_instruction_list(instruction_list):
+                    furnace_entries[furnace_name].append((send_dt, instruction_group))
+
+            for furnace_name, lbl in apo_map.items():
+                entries = furnace_entries.get(furnace_name) or []
+                if not entries:
+                    lbl.config(text="-")
+                    continue
+
+                entries.sort(key=lambda x: x[0])
+                first_dt, first_text = entries[0]
+                rest = len(entries) - 1
+
+                status = "送信予定" if now < first_dt else "期限超過"
+                display = f"{status} {first_dt.strftime('%m/%d %H:%M')} {first_text}"
+                if rest > 0:
+                    display += f" (+{rest})"
+                lbl.config(text=display)
+
+            root.after(5000, refresh_appointment_ui)
+
+        root.after(500, refresh_appointment_ui)
 
 
 
