@@ -16,7 +16,15 @@ import configparser
 from database.access_writer import insert_check_history_batch
 from monitoring.logger_config import setup_logger
 from database.check_history import load_latest_history, load_latest_csv_history
-from csv_monitor.csv_watcher import start_csv_watch, CSVHandler
+from csv_monitor.csv_watcher import (
+    start_csv_watch,
+    CSVHandler,
+    WATCH_FOLDER,
+    read_csv_and_process,
+    split_instruction_list,
+    normalize_history_value,
+)
+from utils.csv_utils import move_csv_done
 from communication.send_queue import start_worker
 from csv_monitor.retry_worker import retry_loop
 from monitoring.health_monitor import heartbeat_loop
@@ -425,12 +433,14 @@ def build_ui(rec_type="PIT"):
     hour_labels_1h = []
     status_labels_1h = []
     input_time_labels_1h = []  # コンフリクト解消
+    confirmer_labels_1h = []
     # ヘッダ行（列構成：「日」「時刻」「判定」「入力時刻」＋各炉）を維持  # コンフリクト解消
     day_day_1h = ttk.Label(one_check_frame, text="-", style="App.TableHeader.TLabel")
     day_day_1h.grid(row=0, column=0)
     ttk.Label(one_check_frame, text="時刻", style="App.TableHeader.TLabel").grid(row=0, column=1)
     ttk.Label(one_check_frame, text="判定", style="App.TableHeader.TLabel").grid(row=0, column=2)
-    ttk.Label(one_check_frame, text="入力時刻", style="App.TableHeader.TLabel").grid(row=0, column=3)
+    ttk.Label(one_check_frame, text="確認者", style="App.TableHeader.TLabel").grid(row=0, column=3)
+    ttk.Label(one_check_frame, text="入力時刻", style="App.TableHeader.TLabel").grid(row=0, column=4)
     for i in range(24):
         lbl_hour = ttk.Label(one_check_frame, text=f"{i}")
         lbl_hour.grid(row=24 - i, column=1)
@@ -438,16 +448,19 @@ def build_ui(rec_type="PIT"):
         lbl_status = ttk.Label(one_check_frame, text="止")
         lbl_status.grid(row=24 - i, column=2)
         status_labels_1h.append(lbl_status)
+        lbl_confirmer = ttk.Label(one_check_frame, text="-")
+        lbl_confirmer.grid(row=24 - i, column=3)
+        confirmer_labels_1h.append(lbl_confirmer)
         lbl_input_time = ttk.Label(one_check_frame, text="-")
-        lbl_input_time.grid(row=24 - i, column=3)
+        lbl_input_time.grid(row=24 - i, column=4)
         input_time_labels_1h.append(lbl_input_time)
 
     for ro in range(len(comment_inter)):
         ok_no_list = []
-        ttk.Label(one_check_frame, text=comment_inter[ro], style="App.TableHeader.TLabel").grid(row=0, column=4 + ro)  # コンフリクト解消
+        ttk.Label(one_check_frame, text=comment_inter[ro], style="App.TableHeader.TLabel").grid(row=0, column=5 + ro)  # コンフリクト解消
         for i in range(24):
             ok_no = ttk.Label(one_check_frame, text="止")
-            ok_no.grid(row=24 - i, column=ro + 4)
+            ok_no.grid(row=24 - i, column=5 + ro)
             ok_no_list.append(ok_no)
         ok_no_list_list_1h.append(ok_no_list)
 
@@ -510,6 +523,7 @@ def build_ui(rec_type="PIT"):
                 ok_no_list_list_1h[ro][i].config(text="止")
         for i in range(24):
             _set_status_label(status_labels_1h[i], "止")  # コンフリクト解消（判定は必ず _set_status_label）
+            confirmer_labels_1h[i].config(text="-")
             input_time_labels_1h[i].config(text="-")  # コンフリクト解消（入力時刻は必ず初期化）
 
         rows = load_history_from_access(
@@ -520,8 +534,9 @@ def build_ui(rec_type="PIT"):
 
         hour_status = {}
         hour_latest_dt = {}
+        hour_latest_worker = {}
         max_recorded_hour = None
-        for furnace_name, hour, record_dt, textbox_value in rows:
+        for furnace_name, hour, record_dt, worker_name, textbox_value in rows:
             if furnace_name not in comment_inter:
                 continue
             col_index = comment_inter.index(furnace_name)
@@ -532,6 +547,7 @@ def build_ui(rec_type="PIT"):
             prev_dt = hour_latest_dt.get(hour_int)
             if prev_dt is None or record_dt > prev_dt:
                 hour_latest_dt[hour_int] = record_dt
+                hour_latest_worker[hour_int] = worker_name
 
             st = _judge_status(target_date, hour_int, record_dt)
             prev = hour_status.get(hour_int)
@@ -541,12 +557,14 @@ def build_ui(rec_type="PIT"):
         for hour_int, st in hour_status.items():
             _set_status_label(status_labels_1h[hour_int], st)  # コンフリクト解消（判定は必ず _set_status_label）
         for hour_int, dt in hour_latest_dt.items():
+            confirmer_labels_1h[hour_int].config(text=str(hour_latest_worker.get(hour_int) or "-"))
             input_time_labels_1h[hour_int].config(text=_format_hhmm(dt))  # コンフリクト解消（入力時刻表示）
 
         # 最新時刻より先（まだ入力されていない領域）は「止」ではなく「-」で表示する
         if max_recorded_hour is not None:
             for hour_int in range(max_recorded_hour + 1, 24):
                 _set_status_label(status_labels_1h[hour_int], "-")  # コンフリクト解消（判定は必ず _set_status_label）
+                confirmer_labels_1h[hour_int].config(text="-")
                 input_time_labels_1h[hour_int].config(text="-")  # コンフリクト解消（入力時刻表示）
                 for ro in range(len(comment_inter)):
                     ok_no_list_list_1h[ro][hour_int].config(text="-")
@@ -565,12 +583,14 @@ def build_ui(rec_type="PIT"):
     hour_labels_4h = []
     status_labels_4h = []
     input_time_labels_4h = []
+    confirmer_labels_4h = []
     # ヘッダ行（列構成：「日」「時刻」「判定」「入力時刻」＋各炉）を維持  # コンフリクト解消
     day_day_4h = ttk.Label(four__check_frame, text="-", style="App.TableHeader.TLabel")
     day_day_4h.grid(row=0, column=0)
     ttk.Label(four__check_frame, text="時刻", style="App.TableHeader.TLabel").grid(row=0, column=1)
     ttk.Label(four__check_frame, text="判定", style="App.TableHeader.TLabel").grid(row=0, column=2)
-    ttk.Label(four__check_frame, text="入力時刻", style="App.TableHeader.TLabel").grid(row=0, column=3)
+    ttk.Label(four__check_frame, text="確認者", style="App.TableHeader.TLabel").grid(row=0, column=3)
+    ttk.Label(four__check_frame, text="入力時刻", style="App.TableHeader.TLabel").grid(row=0, column=4)
     for i in range(8):
         hour = ttk.Label(four__check_frame, text="-")
         hour.grid(row=8 - i, column=1)
@@ -578,16 +598,19 @@ def build_ui(rec_type="PIT"):
         status = ttk.Label(four__check_frame, text="止")
         status.grid(row=8 - i, column=2)
         status_labels_4h.append(status)
+        confirmer = ttk.Label(four__check_frame, text="-")
+        confirmer.grid(row=8 - i, column=3)
+        confirmer_labels_4h.append(confirmer)
         input_time = ttk.Label(four__check_frame, text="-")
-        input_time.grid(row=8 - i, column=3)
+        input_time.grid(row=8 - i, column=4)
         input_time_labels_4h.append(input_time)
 
     for ro in range(len(comment_inter)):
         ok_no_list = []
-        ttk.Label(four__check_frame, text=comment_inter[ro], style="App.TableHeader.TLabel").grid(row=0, column=4 + ro)  # コンフリクト解消
+        ttk.Label(four__check_frame, text=comment_inter[ro], style="App.TableHeader.TLabel").grid(row=0, column=5 + ro)  # コンフリクト解消
         for i in range(8):
             ok_no = ttk.Label(four__check_frame, text="止")
-            ok_no.grid(row=8 - i, column=4 + ro)
+            ok_no.grid(row=8 - i, column=5 + ro)
             ok_no_list.append(ok_no)
         ok_no_list_list.append(ok_no_list)
 
@@ -615,6 +638,7 @@ def build_ui(rec_type="PIT"):
         for i in range(8):
             hour_labels_4h[i].config(text="-")
             _set_status_label(status_labels_4h[i], "-")  # コンフリクト解消（判定は必ず _set_status_label）
+            confirmer_labels_4h[i].config(text="-")
             input_time_labels_4h[i].config(text="-")  # コンフリクト解消（入力時刻は必ず初期化）
 
         rows = load_history_from_access(
@@ -624,7 +648,7 @@ def build_ui(rec_type="PIT"):
         )
 
         hours_by_furnace = defaultdict(dict)
-        for furnace_name, hour, record_dt, textbox_value in rows:
+        for furnace_name, hour, record_dt, worker_name, textbox_value in rows:
             if furnace_name not in comment_inter:
                 continue
             try:
@@ -637,6 +661,7 @@ def build_ui(rec_type="PIT"):
             if prev is None or record_dt > prev["dt"]:
                 hours_by_furnace[furnace_name][hour_int] = {
                     "dt": record_dt,
+                    "worker": worker_name,
                     "temp": _format_temperature(textbox_value),
                 }
 
@@ -653,6 +678,7 @@ def build_ui(rec_type="PIT"):
 
             best_status = None
             best_dt = None
+            best_worker = None
             for furnace_name, hour_map in hours_by_furnace.items():
                 record = hour_map.get(hour_int)
                 if record is None:
@@ -662,7 +688,9 @@ def build_ui(rec_type="PIT"):
                     best_status = st
                 if best_dt is None or record["dt"] > best_dt:
                     best_dt = record["dt"]
+                    best_worker = record.get("worker")
             _set_status_label(status_labels_4h[target_index], best_status if best_status is not None else "-")  # コンフリクト解消
+            confirmer_labels_4h[target_index].config(text=str(best_worker or "-"))
             input_time_labels_4h[target_index].config(text=_format_hhmm(best_dt) if best_dt else "-")  # コンフリクト解消（入力時刻表示）
 
             # 表示対象の時刻でデータが無い炉は「止」で表現する
@@ -695,6 +723,8 @@ def build_ui(rec_type="PIT"):
     # 現在は機能していないため、中止
     if appoint_frame is not None:
         apo_list = []
+        apo_map = {}
+        apo_cancel_buttons = {}
         #　予約内容と取り消しボタン
         for i, furnace in enumerate(inter):
             ttk.Label(appoint_frame, text=furnace).grid(row=i, column=0)
@@ -702,11 +732,121 @@ def build_ui(rec_type="PIT"):
             lbl_apo = ttk.Label(appoint_frame, text="-")
             lbl_apo.grid(row=i, column=2)
             apo_list.append(lbl_apo)
+            apo_map[furnace] = lbl_apo
 
         # 取り消しボタン
         for i in range(len(inter)):
-            btn_ok = ttk.Button(appoint_frame, text="取消", command="")
+            furnace_name = inter[i]
+            btn_ok = ttk.Button(appoint_frame, text="取消")
             btn_ok.grid(row=i, column=3)
+            apo_cancel_buttons[furnace_name] = btn_ok
+
+        def _normalize_furnace_from_filename(filename):
+            if not filename:
+                return ""
+            name = os.path.splitext(os.path.basename(filename))[0]
+            if name.upper().startswith("RE"):
+                name = name[2:]
+            return name
+
+        def cancel_appointments_for_furnace(furnace_name):
+            rec = get_recorder_config(furnace_name)
+            expected_csv = rec.get("file") if rec else None
+            expected_csv_lower = expected_csv.lower() if expected_csv else None
+
+            try:
+                files = [
+                    f for f in os.listdir(WATCH_FOLDER)
+                    if f.lower().endswith(".csv")
+                ]
+            except Exception:
+                return
+
+            target_files = []
+            for f in files:
+                f_lower = f.lower()
+                if expected_csv_lower and f_lower == expected_csv_lower:
+                    target_files.append(f)
+                    continue
+                if _normalize_furnace_from_filename(f) == furnace_name:
+                    target_files.append(f)
+
+            for f in sorted(set(target_files)):
+                try:
+                    move_csv_done(os.path.join(WATCH_FOLDER, f))
+                except Exception:
+                    pass
+
+            refresh_appointment_ui()
+
+        for furnace_name, btn in apo_cancel_buttons.items():
+            btn.configure(command=lambda f=furnace_name: cancel_appointments_for_furnace(f))
+
+        def refresh_appointment_ui():
+            now = datetime.now()
+            furnace_entries = defaultdict(list)
+
+            try:
+                if os.path.isdir(WATCH_FOLDER):
+                    files = [
+                        f for f in os.listdir(WATCH_FOLDER)
+                        if f.lower().endswith(".csv")
+                    ]
+                else:
+                    files = []
+            except Exception:
+                files = []
+
+            for filename in files:
+                path = os.path.join(WATCH_FOLDER, filename)
+                try:
+                    data = read_csv_and_process(path)
+                except Exception:
+                    continue
+
+                if not data:
+                    continue
+
+                end_time_str = data.get("end_time")
+                if not end_time_str:
+                    continue
+
+                normalized_end_time = normalize_history_value(str(end_time_str).strip())
+                if normalized_end_time is None:
+                    continue
+
+                try:
+                    send_dt = datetime.strptime(normalized_end_time, "%Y%m%d%H%M%S")
+                except Exception:
+                    continue
+
+                furnace_name = _normalize_furnace_from_filename(filename)
+                if not furnace_name:
+                    continue
+
+                instruction_list = data.get("instruction_list") or []
+                for instruction_group in split_instruction_list(instruction_list):
+                    furnace_entries[furnace_name].append((send_dt, instruction_group))
+
+            for furnace_name, lbl in apo_map.items():
+                entries = furnace_entries.get(furnace_name) or []
+                if not entries:
+                    lbl.config(text="-")
+                    continue
+
+                entries.sort(key=lambda x: x[0])
+                first_dt, first_text = entries[0]
+                rest = len(entries) - 1
+
+                status = "送信予定" if now < first_dt else "期限超過"
+                display = f"{status} {first_dt.strftime('%m/%d %H:%M')} {first_text}"
+                if rest > 0:
+                    display += f" (+{rest})"
+                lbl.config(text=display)
+
+            root.after(5000, refresh_appointment_ui)
+
+        root.after(500, refresh_appointment_ui)
 
 
 
@@ -948,7 +1088,7 @@ def build_ui(rec_type="PIT"):
         )
 
         # 1件でもあればOK
-        for furnace_name, hour, _record_dt, _textbox_value in rows:
+        for furnace_name, hour, _record_dt, _worker_name, _textbox_value in rows:
             if int(hour) == current_hour:
                 return
 
