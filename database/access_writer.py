@@ -35,17 +35,14 @@ def get_employee_name(emp_db_path, emp_no):
         FROM 社員番号一覧
         WHERE 社員番号 = ?
         """
-        # 社員番号は5桁形式で検索
-        emp_no = str(emp_no).zfill(5)
+        emp_no = str(emp_no).strip()
 
         cur.execute(sql, (emp_no,))
         row = cur.fetchone()
-        # 該当する作業者名があれば返す
         if row:
             return row[0]
-        else:
-            # 未登録時は入力内容をそのまま出す
-            return emp_no
+
+        raise RuntimeError(f"社員番号が社員番号一覧テーブルに存在しません: {emp_no}")
 
 
 # ==========================================================

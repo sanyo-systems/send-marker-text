@@ -433,12 +433,14 @@ def build_ui(rec_type="PIT"):
     hour_labels_1h = []
     status_labels_1h = []
     input_time_labels_1h = []  # コンフリクト解消
+    confirmer_labels_1h = []
     # ヘッダ行（列構成：「日」「時刻」「判定」「入力時刻」＋各炉）を維持  # コンフリクト解消
     day_day_1h = ttk.Label(one_check_frame, text="-", style="App.TableHeader.TLabel")
     day_day_1h.grid(row=0, column=0)
     ttk.Label(one_check_frame, text="時刻", style="App.TableHeader.TLabel").grid(row=0, column=1)
     ttk.Label(one_check_frame, text="判定", style="App.TableHeader.TLabel").grid(row=0, column=2)
-    ttk.Label(one_check_frame, text="入力時刻", style="App.TableHeader.TLabel").grid(row=0, column=3)
+    ttk.Label(one_check_frame, text="確認者", style="App.TableHeader.TLabel").grid(row=0, column=3)
+    ttk.Label(one_check_frame, text="入力時刻", style="App.TableHeader.TLabel").grid(row=0, column=4)
     for i in range(24):
         lbl_hour = ttk.Label(one_check_frame, text=f"{i}")
         lbl_hour.grid(row=24 - i, column=1)
@@ -446,16 +448,19 @@ def build_ui(rec_type="PIT"):
         lbl_status = ttk.Label(one_check_frame, text="止")
         lbl_status.grid(row=24 - i, column=2)
         status_labels_1h.append(lbl_status)
+        lbl_confirmer = ttk.Label(one_check_frame, text="-")
+        lbl_confirmer.grid(row=24 - i, column=3)
+        confirmer_labels_1h.append(lbl_confirmer)
         lbl_input_time = ttk.Label(one_check_frame, text="-")
-        lbl_input_time.grid(row=24 - i, column=3)
+        lbl_input_time.grid(row=24 - i, column=4)
         input_time_labels_1h.append(lbl_input_time)
 
     for ro in range(len(comment_inter)):
         ok_no_list = []
-        ttk.Label(one_check_frame, text=comment_inter[ro], style="App.TableHeader.TLabel").grid(row=0, column=4 + ro)  # コンフリクト解消
+        ttk.Label(one_check_frame, text=comment_inter[ro], style="App.TableHeader.TLabel").grid(row=0, column=5 + ro)  # コンフリクト解消
         for i in range(24):
             ok_no = ttk.Label(one_check_frame, text="止")
-            ok_no.grid(row=24 - i, column=ro + 4)
+            ok_no.grid(row=24 - i, column=5 + ro)
             ok_no_list.append(ok_no)
         ok_no_list_list_1h.append(ok_no_list)
 
@@ -518,6 +523,7 @@ def build_ui(rec_type="PIT"):
                 ok_no_list_list_1h[ro][i].config(text="止")
         for i in range(24):
             _set_status_label(status_labels_1h[i], "止")  # コンフリクト解消（判定は必ず _set_status_label）
+            confirmer_labels_1h[i].config(text="-")
             input_time_labels_1h[i].config(text="-")  # コンフリクト解消（入力時刻は必ず初期化）
 
         rows = load_history_from_access(
@@ -528,8 +534,9 @@ def build_ui(rec_type="PIT"):
 
         hour_status = {}
         hour_latest_dt = {}
+        hour_latest_worker = {}
         max_recorded_hour = None
-        for furnace_name, hour, record_dt, textbox_value in rows:
+        for furnace_name, hour, record_dt, worker_name, textbox_value in rows:
             if furnace_name not in comment_inter:
                 continue
             col_index = comment_inter.index(furnace_name)
@@ -540,6 +547,7 @@ def build_ui(rec_type="PIT"):
             prev_dt = hour_latest_dt.get(hour_int)
             if prev_dt is None or record_dt > prev_dt:
                 hour_latest_dt[hour_int] = record_dt
+                hour_latest_worker[hour_int] = worker_name
 
             st = _judge_status(target_date, hour_int, record_dt)
             prev = hour_status.get(hour_int)
@@ -549,12 +557,14 @@ def build_ui(rec_type="PIT"):
         for hour_int, st in hour_status.items():
             _set_status_label(status_labels_1h[hour_int], st)  # コンフリクト解消（判定は必ず _set_status_label）
         for hour_int, dt in hour_latest_dt.items():
+            confirmer_labels_1h[hour_int].config(text=str(hour_latest_worker.get(hour_int) or "-"))
             input_time_labels_1h[hour_int].config(text=_format_hhmm(dt))  # コンフリクト解消（入力時刻表示）
 
         # 最新時刻より先（まだ入力されていない領域）は「止」ではなく「-」で表示する
         if max_recorded_hour is not None:
             for hour_int in range(max_recorded_hour + 1, 24):
                 _set_status_label(status_labels_1h[hour_int], "-")  # コンフリクト解消（判定は必ず _set_status_label）
+                confirmer_labels_1h[hour_int].config(text="-")
                 input_time_labels_1h[hour_int].config(text="-")  # コンフリクト解消（入力時刻表示）
                 for ro in range(len(comment_inter)):
                     ok_no_list_list_1h[ro][hour_int].config(text="-")
@@ -573,12 +583,14 @@ def build_ui(rec_type="PIT"):
     hour_labels_4h = []
     status_labels_4h = []
     input_time_labels_4h = []
+    confirmer_labels_4h = []
     # ヘッダ行（列構成：「日」「時刻」「判定」「入力時刻」＋各炉）を維持  # コンフリクト解消
     day_day_4h = ttk.Label(four__check_frame, text="-", style="App.TableHeader.TLabel")
     day_day_4h.grid(row=0, column=0)
     ttk.Label(four__check_frame, text="時刻", style="App.TableHeader.TLabel").grid(row=0, column=1)
     ttk.Label(four__check_frame, text="判定", style="App.TableHeader.TLabel").grid(row=0, column=2)
-    ttk.Label(four__check_frame, text="入力時刻", style="App.TableHeader.TLabel").grid(row=0, column=3)
+    ttk.Label(four__check_frame, text="確認者", style="App.TableHeader.TLabel").grid(row=0, column=3)
+    ttk.Label(four__check_frame, text="入力時刻", style="App.TableHeader.TLabel").grid(row=0, column=4)
     for i in range(8):
         hour = ttk.Label(four__check_frame, text="-")
         hour.grid(row=8 - i, column=1)
@@ -586,16 +598,19 @@ def build_ui(rec_type="PIT"):
         status = ttk.Label(four__check_frame, text="止")
         status.grid(row=8 - i, column=2)
         status_labels_4h.append(status)
+        confirmer = ttk.Label(four__check_frame, text="-")
+        confirmer.grid(row=8 - i, column=3)
+        confirmer_labels_4h.append(confirmer)
         input_time = ttk.Label(four__check_frame, text="-")
-        input_time.grid(row=8 - i, column=3)
+        input_time.grid(row=8 - i, column=4)
         input_time_labels_4h.append(input_time)
 
     for ro in range(len(comment_inter)):
         ok_no_list = []
-        ttk.Label(four__check_frame, text=comment_inter[ro], style="App.TableHeader.TLabel").grid(row=0, column=4 + ro)  # コンフリクト解消
+        ttk.Label(four__check_frame, text=comment_inter[ro], style="App.TableHeader.TLabel").grid(row=0, column=5 + ro)  # コンフリクト解消
         for i in range(8):
             ok_no = ttk.Label(four__check_frame, text="止")
-            ok_no.grid(row=8 - i, column=4 + ro)
+            ok_no.grid(row=8 - i, column=5 + ro)
             ok_no_list.append(ok_no)
         ok_no_list_list.append(ok_no_list)
 
@@ -623,6 +638,7 @@ def build_ui(rec_type="PIT"):
         for i in range(8):
             hour_labels_4h[i].config(text="-")
             _set_status_label(status_labels_4h[i], "-")  # コンフリクト解消（判定は必ず _set_status_label）
+            confirmer_labels_4h[i].config(text="-")
             input_time_labels_4h[i].config(text="-")  # コンフリクト解消（入力時刻は必ず初期化）
 
         rows = load_history_from_access(
@@ -632,7 +648,7 @@ def build_ui(rec_type="PIT"):
         )
 
         hours_by_furnace = defaultdict(dict)
-        for furnace_name, hour, record_dt, textbox_value in rows:
+        for furnace_name, hour, record_dt, worker_name, textbox_value in rows:
             if furnace_name not in comment_inter:
                 continue
             try:
@@ -645,6 +661,7 @@ def build_ui(rec_type="PIT"):
             if prev is None or record_dt > prev["dt"]:
                 hours_by_furnace[furnace_name][hour_int] = {
                     "dt": record_dt,
+                    "worker": worker_name,
                     "temp": _format_temperature(textbox_value),
                 }
 
@@ -661,6 +678,7 @@ def build_ui(rec_type="PIT"):
 
             best_status = None
             best_dt = None
+            best_worker = None
             for furnace_name, hour_map in hours_by_furnace.items():
                 record = hour_map.get(hour_int)
                 if record is None:
@@ -670,7 +688,9 @@ def build_ui(rec_type="PIT"):
                     best_status = st
                 if best_dt is None or record["dt"] > best_dt:
                     best_dt = record["dt"]
+                    best_worker = record.get("worker")
             _set_status_label(status_labels_4h[target_index], best_status if best_status is not None else "-")  # コンフリクト解消
+            confirmer_labels_4h[target_index].config(text=str(best_worker or "-"))
             input_time_labels_4h[target_index].config(text=_format_hhmm(best_dt) if best_dt else "-")  # コンフリクト解消（入力時刻表示）
 
             # 表示対象の時刻でデータが無い炉は「止」で表現する
@@ -1068,7 +1088,7 @@ def build_ui(rec_type="PIT"):
         )
 
         # 1件でもあればOK
-        for furnace_name, hour, _record_dt, _textbox_value in rows:
+        for furnace_name, hour, _record_dt, _worker_name, _textbox_value in rows:
             if int(hour) == current_hour:
                 return
 
